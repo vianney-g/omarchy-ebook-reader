@@ -69,7 +69,8 @@ Panel {
     lastBookId = String(payload.lastBookId || "")
     converterAvailable = payload.converterAvailable === true
     rebuildVisibleBooks()
-    if (hostWidget && books.length > 0) hostWidget.lastTitle = String(books[0].title || "")
+    var recent = lastBook()
+    if (hostWidget && recent) hostWidget.lastTitle = String(recent.title || "")
   }
 
   function rebuildVisibleBooks() {

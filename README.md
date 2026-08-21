@@ -2,7 +2,9 @@
 
 Leaf Reader turns the Omarchy bar into a calm, local-first ebook library. Click the book icon to browse your covers; right-click it to jump straight back into the last book and exact location you were reading.
 
-The library panel is compact and native to the Omarchy shell. Reading opens in a spacious native Qt window designed to disappear around the page: quiet typography, restrained controls, no accounts, no cloud, and no library management ceremony.
+![Leaf Reader in distraction-free reading mode](preview.png)
+
+The library panel is compact and native to the Omarchy shell. Reading opens in a separate native Qt window designed to disappear around the page: quiet typography, restrained controls, no accounts, no cloud, and no library management ceremony. The separate process keeps the shell isolated from the comparatively heavy WebEngine renderer.
 
 ## What it does
 
@@ -14,7 +16,8 @@ The library panel is compact and native to the Omarchy shell. Reading opens in a
 - Reads PDF through Qt WebEngine's built-in viewer
 - Supports AZW3, MOBI, AZW, PRC, FB2, FBZ, HTMLZ, RTF, TXT, and TXTZ when the optional `ebook-convert` command is available
 - Includes title/author search, table of contents, in-book search, bookmarks, progress scrubbing, and keyboard navigation
-- Provides text size, serif/sans/publisher fonts, line spacing, reading width, page/scroll layouts, and paper/sepia/slate/night themes
+- Provides text size, serif/sans/publisher fonts, line spacing, reading width, page/scroll layouts, and Paper, Sepia, Slate, and Night themes
+- Adds a tactile Meditations-inspired page turn in paginated mode, with an automatic reduced-motion fallback
 - Stores state under XDG state/cache folders and never uploads book data
 
 ## Install
@@ -23,7 +26,7 @@ The library panel is compact and native to the Omarchy shell. Reading opens in a
 omarchy plugin add https://github.com/dlpwaters/omarchy-ebook-reader.git --enable
 ```
 
-Leaf Reader needs `qt6-webengine`, `python`, and `zenity`. These are already present on a standard current Omarchy installation. EPUB and PDF work without Calibre.
+Leaf Reader needs `qt6-declarative`, `qt6-webengine`, `python`, and `zenity`. These are already present on a standard current Omarchy installation. EPUB and PDF work without Calibre.
 
 For Kindle and other conversion-only formats, install Calibre only if you need it:
 
@@ -75,7 +78,8 @@ Your original books are never modified.
 python3 -m unittest discover -s tests -v
 python3 -m py_compile ebook-tool
 node --check web/app.js
-qmllint -I /usr/share/omarchy/shell BarWidget.qml Panel.qml Reader.qml
+qmllint -I /usr/share/omarchy/shell BarWidget.qml Panel.qml
+qmllint ReaderApp.qml
 omarchy plugin validate .
 ./ebook-tool doctor
 ```

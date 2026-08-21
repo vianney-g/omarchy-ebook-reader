@@ -34,7 +34,7 @@ body { background: var(--bg); color: var(--ink); }
   --surface: rgba(29, 29, 29, .97); --shadow: 0 24px 80px rgba(0, 0, 0, .5);
 }
 
-#app { background: var(--page); transition: background .2s ease, color .2s ease; }
+#app { background: var(--page); color: var(--ink); transition: background .2s ease, color .2s ease; }
 .toolbar {
   position: absolute; inset: 0 0 auto; z-index: 20; height: 66px; display: grid;
   grid-template-columns: minmax(150px, 1fr) minmax(240px, 2fr) minmax(150px, 1fr);
@@ -58,6 +58,52 @@ body { background: var(--bg); color: var(--ink); }
 #readerShell { position: absolute; inset: 0; background: var(--page); }
 #viewer { position: absolute; inset: 76px 64px 48px; }
 #pdfViewer { position: absolute; inset: 66px 0 42px; width: 100%; height: calc(100% - 108px); border: 0; display: none; background: var(--page); }
+.page-turn-effect {
+  position: absolute; inset: 76px 64px 48px; z-index: 7; display: none;
+  perspective: 2400px; pointer-events: none; overflow: hidden;
+}
+.page-turn-effect.active { display: block; }
+.page-turn-sheet {
+  position: absolute; top: 0; bottom: 0; width: 50%; transform-style: preserve-3d;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--page) 82%, var(--ink)) 0, var(--page) 4%, var(--page) 94%, color-mix(in srgb, var(--page) 88%, var(--ink)) 100%);
+  backface-visibility: visible; will-change: transform, filter;
+}
+.page-turn-sheet::before, .page-turn-sheet::after {
+  content: ""; position: absolute; inset: 0; backface-visibility: hidden;
+}
+.page-turn-sheet::before {
+  background: linear-gradient(90deg, transparent 70%, color-mix(in srgb, var(--ink) 22%, transparent));
+}
+.page-turn-sheet::after {
+  transform: rotateY(180deg);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--ink) 18%, transparent), transparent 28%);
+}
+.page-turn-sheet span {
+  position: absolute; z-index: 2; top: 0; bottom: 0; width: 18%; opacity: .7;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--ink) 24%, transparent), transparent);
+  filter: blur(7px);
+}
+.page-turn-effect.turn-next .page-turn-sheet {
+  left: 50%; transform-origin: left center; animation: leaf-turn-next 520ms cubic-bezier(.32,.02,.18,1) both;
+}
+.page-turn-effect.turn-next .page-turn-sheet span { left: -8%; }
+.page-turn-effect.turn-previous .page-turn-sheet {
+  left: 0; transform-origin: right center; animation: leaf-turn-previous 520ms cubic-bezier(.32,.02,.18,1) both;
+}
+.page-turn-effect.turn-previous .page-turn-sheet span { right: -8%; }
+@keyframes leaf-turn-next {
+  0% { transform: rotateY(0deg); filter: drop-shadow(-1px 3px 2px rgb(0 0 0 / 4%)); }
+  42% { transform: rotateY(-78deg) scaleX(.98); filter: drop-shadow(-22px 10px 15px rgb(0 0 0 / 24%)); }
+  58% { transform: rotateY(-103deg) scaleX(.98); filter: drop-shadow(-26px 10px 18px rgb(0 0 0 / 28%)); }
+  100% { transform: rotateY(-180deg); filter: drop-shadow(-2px 3px 2px rgb(0 0 0 / 3%)); }
+}
+@keyframes leaf-turn-previous {
+  0% { transform: rotateY(0deg); filter: drop-shadow(1px 3px 2px rgb(0 0 0 / 4%)); }
+  42% { transform: rotateY(78deg) scaleX(.98); filter: drop-shadow(22px 10px 15px rgb(0 0 0 / 24%)); }
+  58% { transform: rotateY(103deg) scaleX(.98); filter: drop-shadow(26px 10px 18px rgb(0 0 0 / 28%)); }
+  100% { transform: rotateY(180deg); filter: drop-shadow(2px 3px 2px rgb(0 0 0 / 3%)); }
+}
 .page-zone { position: absolute; z-index: 8; top: 82px; bottom: 52px; width: 7%; min-width: 46px; border: 0; background: transparent; cursor: pointer; opacity: 0; }
 .page-zone:hover { opacity: 1; background: linear-gradient(90deg, var(--accent-soft), transparent); }
 .page-zone-left { left: 0; }
@@ -149,4 +195,12 @@ input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer;
   .toolbar-side { gap: 0; }.icon-button { width: 36px; }.book-heading strong { font-size: 14px; }
   #viewer { inset-inline: 28px; }.progress-bar { padding-inline: 10px; grid-template-columns: 46px 1fr 46px; }
   .library-grid { grid-template-columns: repeat(auto-fill, minmax(105px, 1fr)); }
+  .page-turn-effect { inset-inline: 28px; }
+  .page-turn-sheet { width: 100%; }
+  .page-turn-effect.turn-next .page-turn-sheet { left: 0; transform-origin: left center; }
+  .page-turn-effect.turn-previous .page-turn-sheet { left: 0; transform-origin: right center; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-turn-effect { display: none !important; }
 }

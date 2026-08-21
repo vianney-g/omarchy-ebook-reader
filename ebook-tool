@@ -33,6 +33,7 @@ SETTINGS_FILE = STATE_DIR / "settings.json"
 PROGRESS_FILE = STATE_DIR / "progress.json"
 INDEX_FILE = CACHE_DIR / "index.json"
 SERVER_FILE = STATE_DIR / "server.json"
+READER_FILE = STATE_DIR / "reader.json"
 PORT = 4189
 
 SUPPORTED = {"epub", "azw", "azw3", "mobi", "prc", "pdf", "fb2", "fbz", "htmlz", "txt", "txtz", "rtf"}
@@ -372,16 +373,36 @@ def server_info() -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def server_alive(info: dict | None = None) -> bool:
+def runtime_revision() -> str:
+    paths = [Path(__file__).resolve(), WEB_DIR / "index.html", WEB_DIR / "app.css", WEB_DIR / "app.js",
+             WEB_DIR / "vendor" / "epub.min.js", WEB_DIR / "vendor" / "jszip.min.js"]
+    signature = []
+    for path in paths:
+        try:
+            stat = path.stat()
+            signature.append(f"{path.name}:{stat.st_mtime_ns}:{stat.st_size}")
+        except OSError:
+            signature.append(f"{path.name}:missing")
+    return stable_id("|".join(signature))
+
+
+def server_process_alive(info: dict | None = None) -> bool:
     info = info or server_info()
     pid = int(info.get("pid", 0) or 0)
     if pid <= 0:
         return False
     try:
-        os.kill(pid, 0)
-        return True
+        command = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+        return b"serve" in command and any(Path(os.fsdecode(part)).name == "ebook-tool" for part in command if part)
     except OSError:
         return False
+
+
+def server_alive(info: dict | None = None) -> bool:
+    info = info or server_info()
+    return (server_process_alive(info)
+            and info.get("helper") == str(Path(__file__).resolve())
+            and info.get("revision") == runtime_revision())
 
 
 class ReaderHandler(BaseHTTPRequestHandler):
@@ -397,7 +418,7 @@ class ReaderHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", cache)
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
-        self.send_header("Content-Security-Policy", "default-src 'self' blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-src blob: 'self'")
+        self.send_header("Content-Security-Policy", "default-src 'self' blob:; script-src 'self'; style-src 'self' 'unsafe-inline' blob:; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-src blob: 'self'")
         self.end_headers()
         self.wfile.write(data)
 
@@ -490,7 +511,9 @@ class ReaderServer(ThreadingHTTPServer):
 def serve() -> int:
     token = secrets.token_urlsafe(24)
     server = ReaderServer(("127.0.0.1", PORT), token)
-    atomic_json(SERVER_FILE, {"pid": os.getpid(), "port": PORT, "token": token, "started": utc_now()})
+    atomic_json(SERVER_FILE, {"pid": os.getpid(), "port": PORT, "token": token,
+                              "helper": str(Path(__file__).resolve()), "revision": runtime_revision(),
+                              "started": utc_now()})
     try:
         server.serve_forever(poll_interval=0.4)
     finally:
@@ -503,6 +526,15 @@ def start_server() -> dict:
     info = server_info()
     if server_alive(info):
         return {"ok": True, "url": f"http://127.0.0.1:{info.get('port', PORT)}/", "pid": info.get("pid")}
+    if server_process_alive(info):
+        try:
+            os.kill(int(info["pid"]), 15)
+            for _ in range(30):
+                if not server_process_alive(info):
+                    break
+                time.sleep(0.05)
+        except (OSError, ValueError, TypeError):
+            pass
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "serve"], stdin=subprocess.DEVNULL,
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
@@ -514,6 +546,79 @@ def start_server() -> dict:
     return {"ok": False, "error": "Reader service did not start"}
 
 
+def activate_reader(pid: int) -> bool:
+    """Focus and fullscreen the reader on Hyprland, with Qt as the fallback elsewhere."""
+    hyprctl = shutil.which("hyprctl")
+    if not hyprctl or not os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
+        return False
+    selector = f"pid:{pid}"
+    for _ in range(50):
+        try:
+            listed = subprocess.run([hyprctl, "clients", "-j"], capture_output=True, text=True, timeout=1)
+            clients = json.loads(listed.stdout) if listed.returncode == 0 else []
+            if any(int(client.get("pid", 0)) == pid for client in clients):
+                # Let Qt finish its initial visibility negotiation before the
+                # compositor applies the final state. Otherwise a late Qt
+                # surface update can restore the window to the tiled layout.
+                time.sleep(0.35)
+                focused = fullscreen = None
+                for _ in range(2):
+                    focused = subprocess.run([
+                        hyprctl, "dispatch", f'hl.dsp.focus({{ window = "{selector}" }})'
+                    ], capture_output=True, text=True, timeout=1)
+                    fullscreen = subprocess.run([
+                        hyprctl, "dispatch",
+                        f'hl.dsp.window.fullscreen({{ mode = "fullscreen", action = "set", window = "{selector}" }})'
+                    ], capture_output=True, text=True, timeout=1)
+                    time.sleep(0.15)
+                return focused.returncode == 0 and fullscreen.returncode == 0
+        except (OSError, subprocess.SubprocessError, ValueError, TypeError):
+            return False
+        time.sleep(0.04)
+    return False
+
+
+def launch_reader(book_id: str = "") -> dict:
+    payload = library_payload()
+    books = payload["books"]
+    wanted = book_id or str(payload.get("lastBookId", ""))
+    if wanted and not any(book["id"] == wanted for book in books):
+        return {"ok": False, "error": "Book not found"}
+    if not wanted and books:
+        wanted = books[0]["id"]
+    if not wanted:
+        return {"ok": False, "error": "No ebooks were found in the selected library folder"}
+    server = start_server()
+    if not server.get("ok"):
+        return server
+    runner = shutil.which("qml6") or str(Path("/usr/lib/qt6/bin/qml"))
+    if not Path(runner).is_file():
+        runner = shutil.which("qml") or ""
+    if not runner:
+        return {"ok": False, "error": "The Qt 6 QML runner is not installed"}
+    url = str(server["url"]) + "?book=" + urllib.parse.quote(wanted)
+    update_progress(wanted, {})
+    previous = read_json(READER_FILE, {})
+    if isinstance(previous, dict):
+        previous_pid = int(previous.get("pid", 0) or 0)
+        try:
+            command_line = Path(f"/proc/{previous_pid}/cmdline").read_bytes().replace(b"\0", b" ")
+            if b"ReaderApp.qml" in command_line:
+                os.kill(previous_pid, 15)
+                for _ in range(20):
+                    time.sleep(0.05)
+                    if not Path(f"/proc/{previous_pid}").exists():
+                        break
+        except (OSError, ValueError):
+            pass
+    process = subprocess.Popen([runner, str(PLUGIN_DIR / "ReaderApp.qml")],
+                               stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, start_new_session=True)
+    atomic_json(READER_FILE, {"pid": process.pid, "bookId": wanted, "url": url, "opened": utc_now()})
+    activate_reader(process.pid)
+    return {"ok": True, "pid": process.pid, "bookId": wanted, "url": url}
+
+
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description="Leaf Reader local helper")
     sub = result.add_subparsers(dest="command", required=True)
@@ -523,6 +628,8 @@ def parser() -> argparse.ArgumentParser:
     lib.add_argument("--limit", type=int, default=0)
     sub.add_parser("start")
     sub.add_parser("serve")
+    opened = sub.add_parser("open")
+    opened.add_argument("book_id", nargs="?", default="")
     choose = sub.add_parser("choose-folder")
     choose.add_argument("--folder")
     config = sub.add_parser("settings")
@@ -551,6 +658,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "start":
         print(json.dumps(start_server()))
         return 0
+    if args.command == "open":
+        result = launch_reader(args.book_id)
+        print(json.dumps(result))
+        return 0 if result.get("ok") else 1
     if args.command == "choose-folder":
         chosen = args.folder
         if not chosen:

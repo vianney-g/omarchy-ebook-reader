@@ -5,6 +5,7 @@ const $$ = (selector) => [...document.querySelectorAll(selector)];
 const state = {
   bootstrap: null, settings: null, token: "", book: null, epub: null, rendition: null,
   location: null, bookmarks: [], saveTimer: 0, hideTimer: 0, searchGeneration: 0,
+  restoreCfi: "", percentage: 0, turning: false, turnTimer: 0,
 };
 
 function toast(message) {
@@ -38,8 +39,14 @@ function contentTheme() {
   const map = {
     paper: { body: { color: "#28231f", background: "#fffdf8" }, a: { color: "#8c5731" } },
     sepia: { body: { color: "#372c22", background: "#f4ead6" }, a: { color: "#8a552f" } },
-    slate: { body: { color: "#e8edef", background: "#313c43" }, a: { color: "#a9cad8" } },
-    night: { body: { color: "#dedad3", background: "#1d1d1d" }, a: { color: "#d4a576" } },
+    slate: {
+      body: { color: "#e8edef", background: "#313c43" },
+      "body *": { color: "#e8edef !important" }, "a, a *": { color: "#a9cad8 !important" },
+    },
+    night: {
+      body: { color: "#dedad3", background: "#1d1d1d" },
+      "body *": { color: "#dedad3 !important" }, "a, a *": { color: "#d4a576 !important" },
+    },
   };
   return map[state.settings.theme];
 }
@@ -100,7 +107,10 @@ function openDrawer(selector) {
   drawer.setAttribute("aria-hidden", "false");
   $("#scrim").hidden = false;
   document.body.classList.remove("chrome-hidden");
-  if (selector === "#libraryDrawer") setTimeout(() => $("#librarySearch").focus(), 180);
+  if (selector === "#libraryDrawer") {
+    renderLibrary();
+    setTimeout(() => $("#librarySearch").focus(), 180);
+  }
   if (selector === "#searchDrawer") setTimeout(() => $("#bookSearch").focus(), 180);
 }
 
@@ -116,7 +126,7 @@ function bookCard(book) {
   button.dataset.id = book.id;
   button.innerHTML = `
     <div class="cover-wrap">
-      ${book.cover ? `<img class="book-cover" src="/api/cover/${encodeURIComponent(book.id)}" alt="">` : `<span class="cover-fallback"></span>`}
+      ${book.cover ? `<img class="book-cover" src="/api/cover/${encodeURIComponent(book.id)}" alt="" loading="lazy" decoding="async">` : `<span class="cover-fallback"></span>`}
       <span class="card-progress"><span style="width:${Math.round((book.progress || 0) * 100)}%"></span></span>
     </div>
     <strong></strong><small></small>`;
@@ -130,7 +140,8 @@ function bookCard(book) {
 
 function renderLibrary() {
   const query = $("#librarySearch").value.trim().toLowerCase();
-  const books = state.bootstrap.books.filter(book => `${book.title} ${book.author}`.toLowerCase().includes(query));
+  const allMatches = state.bootstrap.books.filter(book => `${book.title} ${book.author}`.toLowerCase().includes(query));
+  const books = allMatches.slice(0, 80);
   const grid = $("#libraryGrid");
   grid.replaceChildren(...books.map(bookCard));
   $("#emptyLibrary").hidden = books.length > 0;
@@ -177,10 +188,9 @@ function renderBookmarks() {
 async function persistProgress(extra = {}) {
   if (!state.book) return;
   const location = state.location;
-  const percentage = location?.start?.percentage ?? activeBookProgress().percentage ?? 0;
   const payload = {
     cfi: location?.start?.cfi || activeBookProgress().cfi || "",
-    percentage,
+    percentage: Number.isFinite(state.percentage) ? state.percentage : (activeBookProgress().percentage || 0),
     chapter: $("#chapterTitle").textContent || "",
     bookmarks: state.bookmarks,
     ...extra,
@@ -242,6 +252,8 @@ async function openBook(bookId) {
   $("#chapterTitle").textContent = book.author;
   history.replaceState(null, "", `?book=${encodeURIComponent(book.id)}`);
   const progress = activeBookProgress(book.id);
+  state.restoreCfi = progress.cfi || "";
+  state.percentage = Number(progress.percentage || 0);
   state.bookmarks = Array.isArray(progress.bookmarks) ? progress.bookmarks : [];
   renderBookmarks();
   if (book.format === "pdf" && !book.files?.epub) {
@@ -287,10 +299,25 @@ async function openBook(bookId) {
 function onRelocated(location) {
   state.location = location;
   let percentage = location.start?.percentage;
-  if ((!Number.isFinite(percentage) || percentage === 0) && state.epub?.locations?.length()) {
-    percentage = state.epub.locations.percentageFromCfi(location.start.cfi);
+  const saved = activeBookProgress();
+  if (state.restoreCfi && location.start?.cfi === state.restoreCfi) {
+    percentage = Number(saved.percentage || 0);
+  } else {
+    if (state.restoreCfi) state.restoreCfi = "";
+  }
+  if ((!Number.isFinite(percentage) || percentage === 0) && !state.restoreCfi) {
+    if (state.epub?.locations?.length()) {
+      percentage = state.epub.locations.percentageFromCfi(location.start.cfi);
+    } else {
+      // Location generation is asynchronous. Preserve the saved percentage
+      // when EPUB.js restores the exact CFI before its percentage map exists.
+      if (saved.cfi === location.start?.cfi && Number.isFinite(Number(saved.percentage))) {
+        percentage = Number(saved.percentage);
+      }
+    }
   }
   percentage = Number.isFinite(percentage) ? Math.max(0, Math.min(1, percentage)) : 0;
+  state.percentage = percentage;
   $("#progressSlider").value = Math.round(percentage * 1000);
   $("#percentLabel").textContent = `${Math.round(percentage * 100)}%`;
   $("#pageLabel").textContent = location.start?.displayed ? `${location.start.displayed.page} / ${location.start.displayed.total}` : "—";
@@ -303,9 +330,25 @@ function onRelocated(location) {
 }
 
 function navigate(direction) {
-  if (!state.rendition) return;
+  if (!state.rendition || state.turning) return;
   chromeAwake();
-  direction < 0 ? state.rendition.prev() : state.rendition.next();
+  const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (state.settings.flow !== "paginated" || reducedMotion) {
+    direction < 0 ? state.rendition.prev() : state.rendition.next();
+    return;
+  }
+  state.turning = true;
+  const effect = $("#pageTurnEffect");
+  effect.className = `page-turn-effect active ${direction < 0 ? "turn-previous" : "turn-next"}`;
+  const turn = setTimeout(() => {
+    direction < 0 ? state.rendition.prev() : state.rendition.next();
+  }, 245);
+  clearTimeout(state.turnTimer);
+  state.turnTimer = setTimeout(() => {
+    clearTimeout(turn);
+    effect.className = "page-turn-effect";
+    state.turning = false;
+  }, 540);
 }
 
 function onReaderKey(event) { handleKey(event); }
@@ -394,7 +437,6 @@ async function initialize() {
     state.token = state.bootstrap.token;
     state.settings = state.bootstrap.settings;
     applyAppearance(false);
-    renderLibrary();
     const requested = new URLSearchParams(location.search).get("book");
     const bookId = requested || state.bootstrap.lastBookId || state.bootstrap.books[0]?.id;
     if (!bookId) {

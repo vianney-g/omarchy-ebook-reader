@@ -6,6 +6,7 @@ import unittest
 import urllib.request
 import zipfile
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -45,6 +46,7 @@ class LeafReaderTests(unittest.TestCase):
         leaf.PROGRESS_FILE = leaf.STATE_DIR / "progress.json"
         leaf.INDEX_FILE = leaf.CACHE_DIR / "index.json"
         leaf.SERVER_FILE = leaf.STATE_DIR / "server.json"
+        leaf.READER_FILE = leaf.STATE_DIR / "reader.json"
         leaf.atomic_json(leaf.SETTINGS_FILE, {"libraryFolder": str(self.library)})
 
     def tearDown(self):
@@ -136,6 +138,23 @@ class LeafReaderTests(unittest.TestCase):
         finally:
             server.shutdown()
             server.server_close()
+
+    def test_native_reader_launch_uses_isolated_qt6_process(self):
+        make_epub(self.library / "Book.epub")
+        book = leaf.scan_library()[0]
+        fake_process = mock.Mock(pid=4242)
+        with mock.patch.object(leaf, "start_server", return_value={"ok": True, "url": "http://127.0.0.1:4189/"}), \
+             mock.patch.object(leaf.shutil, "which", side_effect=lambda name: "/usr/bin/qml6" if name == "qml6" else None), \
+             mock.patch.object(leaf, "activate_reader", return_value=True) as activate, \
+             mock.patch.object(leaf.subprocess, "Popen", return_value=fake_process) as popen:
+            result = leaf.launch_reader(book["id"])
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["pid"], 4242)
+        command = popen.call_args.args[0]
+        self.assertEqual(command[0], "/usr/bin/qml6")
+        self.assertEqual(Path(command[1]).name, "ReaderApp.qml")
+        activate.assert_called_once_with(4242)
+        self.assertEqual(leaf.progress_state()["lastBookId"], book["id"])
 
 
 if __name__ == "__main__":

@@ -10,7 +10,8 @@ BarWidget {
 
   readonly property string helperPath: String(Qt.resolvedUrl("ebook-tool")).replace(/^file:\/\//, "")
   property string lastTitle: ""
-  property bool readerOpened: readerLoader.item ? readerLoader.item.opened : false
+  property bool launching: false
+  property string launchOutput: ""
 
   function inject() {
     var panel = panelLoader.item
@@ -21,19 +22,18 @@ BarWidget {
       if ("hostWidget" in panel) panel.hostWidget = root
       if ("helperPath" in panel) panel.helperPath = root.helperPath
     }
-    var reader = readerLoader.item
-    if (reader) {
-      if ("helperPath" in reader) reader.helperPath = root.helperPath
-      if ("hostWidget" in reader) reader.hostWidget = root
-    }
   }
 
   function open() { if (panelLoader.item) panelLoader.item.open() }
   function close() { if (panelLoader.item) panelLoader.item.close() }
   function toggle() { if (panelLoader.item) panelLoader.item.toggle() }
   function openReader(bookId, title) {
-    if (!readerLoader.item) return
-    readerLoader.item.openBook(String(bookId || ""), String(title || ""))
+    if (launchProc.running) return
+    launchOutput = ""
+    launching = true
+    launchProc.command = String(bookId || "") !== ""
+      ? [helperPath, "open", String(bookId)] : [helperPath, "open"]
+    launchProc.running = true
   }
   function resume() { openReader("", lastTitle) }
   function refreshSummary() {
@@ -78,12 +78,14 @@ BarWidget {
     onLoaded: { root.inject(); Qt.callLater(root.inject) }
   }
 
-  Loader {
-    id: readerLoader
-    active: true
-    source: Qt.resolvedUrl("Reader.qml")
-    visible: false
-    onLoaded: { root.inject(); Qt.callLater(root.inject) }
+  Process {
+    id: launchProc
+    stdout: StdioCollector { waitForEnd: true; onStreamFinished: root.launchOutput = text }
+    stderr: StdioCollector { waitForEnd: true }
+    onExited: {
+      root.launching = false
+      root.refreshSummary()
+    }
   }
 
   IpcHandler {
@@ -95,7 +97,7 @@ BarWidget {
     function read(bookId: string) { root.openReader(bookId, "") }
     function status(): string {
       return JSON.stringify({ panelOpen: panelLoader.item ? panelLoader.item.opened : false,
-        readerOpen: root.readerOpened, lastTitle: root.lastTitle })
+        launching: root.launching, lastTitle: root.lastTitle })
     }
   }
 
@@ -103,8 +105,8 @@ BarWidget {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: "󰂺"
-    active: root.readerOpened || (panelLoader.item ? panelLoader.item.opened : false)
+    text: root.launching ? "󰔟" : "󰂺"
+    active: root.launching || (panelLoader.item ? panelLoader.item.opened : false)
     useActiveColor: true
     tooltipText: root.lastTitle !== "" ? "Leaf Reader · Continue “" + root.lastTitle + "”" : "Leaf Reader"
     onPressed: function(mouseButton) {
