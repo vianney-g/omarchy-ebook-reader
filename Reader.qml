@@ -143,7 +143,11 @@ Item {
         }
       }
 
-      Rectangle { anchors { left: parent.left; right: parent.right; bottom: parent.bottom }; height: 1; color: "#2b2b2b" }
+      Rectangle {
+        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+        height: 1
+        color: "#2b2b2b"
+      }
     }
 
     WebEngineView {

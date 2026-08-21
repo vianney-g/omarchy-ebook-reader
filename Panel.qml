@@ -334,7 +334,7 @@ Panel {
               clip: true
               model: root.visibleBooks
               boundsBehavior: Flickable.StopAtBounds
-              ScrollBar.vertical: QQC.ScrollBar { policy: QQC.ScrollBar.AsNeeded }
+              QQC.ScrollBar.vertical: QQC.ScrollBar { policy: QQC.ScrollBar.AsNeeded }
 
               delegate: Item {
                 required property var modelData
