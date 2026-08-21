@@ -1,0 +1,611 @@
+#!/usr/bin/env python3
+"""Local library, persistence, conversion, and loopback server for Leaf Reader."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import html
+import json
+import mimetypes
+import os
+import re
+import secrets
+import shutil
+import subprocess
+import sys
+import threading
+import time
+import urllib.parse
+import zipfile
+from datetime import datetime, timezone
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from xml.etree import ElementTree as ET
+
+
+PLUGIN_DIR = Path(__file__).resolve().parent
+WEB_DIR = PLUGIN_DIR / "web"
+STATE_DIR = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "omarchy-ebook-reader"
+CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "omarchy-ebook-reader"
+SETTINGS_FILE = STATE_DIR / "settings.json"
+PROGRESS_FILE = STATE_DIR / "progress.json"
+INDEX_FILE = CACHE_DIR / "index.json"
+SERVER_FILE = STATE_DIR / "server.json"
+PORT = 4189
+
+SUPPORTED = {"epub", "azw", "azw3", "mobi", "prc", "pdf", "fb2", "fbz", "htmlz", "txt", "txtz", "rtf"}
+CONVERTIBLE = SUPPORTED - {"epub", "pdf"}
+FORMAT_PRIORITY = ["epub", "azw3", "mobi", "azw", "prc", "fb2", "fbz", "htmlz", "rtf", "txtz", "txt", "pdf"]
+THEMES = {"paper", "sepia", "night", "slate"}
+FONTS = {"serif", "sans", "publisher"}
+FLOWS = {"paginated", "scrolled"}
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def atomic_json(path: Path, value: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_suffix(path.suffix + f".tmp-{os.getpid()}")
+    temp.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    os.replace(temp, path)
+
+
+def read_json(path: Path, fallback: object) -> object:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return value
+    except (OSError, ValueError, TypeError):
+        return fallback
+
+
+def default_library() -> str:
+    candidates = [Path.home() / "Books", Path.home() / "Calibre Library"]
+    for candidate in candidates:
+        if candidate.is_dir() and any(candidate.rglob("*.epub")):
+            return str(candidate)
+    return str(candidates[0])
+
+
+def default_settings() -> dict:
+    return {
+        "libraryFolder": default_library(),
+        "fontSize": 20,
+        "fontFamily": "serif",
+        "lineHeight": 1.65,
+        "pageWidth": 760,
+        "theme": "paper",
+        "flow": "paginated",
+        "showClock": False,
+        "sort": "recent",
+    }
+
+
+def settings() -> dict:
+    result = default_settings()
+    saved = read_json(SETTINGS_FILE, {})
+    if isinstance(saved, dict):
+        result.update(saved)
+    return validate_settings(result)
+
+
+def validate_settings(value: dict) -> dict:
+    result = default_settings()
+    result.update(value)
+    folder = Path(os.path.expandvars(os.path.expanduser(str(result.get("libraryFolder", ""))))).resolve()
+    result["libraryFolder"] = str(folder)
+    result["fontSize"] = max(14, min(36, int(result.get("fontSize", 20))))
+    result["lineHeight"] = max(1.25, min(2.2, round(float(result.get("lineHeight", 1.65)), 2)))
+    result["pageWidth"] = max(520, min(1100, int(result.get("pageWidth", 760))))
+    result["theme"] = result.get("theme") if result.get("theme") in THEMES else "paper"
+    result["fontFamily"] = result.get("fontFamily") if result.get("fontFamily") in FONTS else "serif"
+    result["flow"] = result.get("flow") if result.get("flow") in FLOWS else "paginated"
+    result["showClock"] = bool(result.get("showClock", False))
+    result["sort"] = result.get("sort") if result.get("sort") in {"recent", "title", "author", "added"} else "recent"
+    return result
+
+
+def save_settings(changes: dict) -> dict:
+    current = settings()
+    current.update(changes)
+    current = validate_settings(current)
+    atomic_json(SETTINGS_FILE, current)
+    return current
+
+
+def text_of(node: ET.Element | None, default: str = "") -> str:
+    if node is None:
+        return default
+    return " ".join("".join(node.itertext()).split()) or default
+
+
+def parse_opf_bytes(data: bytes) -> dict:
+    try:
+        root = ET.fromstring(data)
+    except ET.ParseError:
+        return {}
+    title = text_of(root.find(".//{http://purl.org/dc/elements/1.1/}title"))
+    creators = [text_of(x) for x in root.findall(".//{http://purl.org/dc/elements/1.1/}creator") if text_of(x)]
+    language = text_of(root.find(".//{http://purl.org/dc/elements/1.1/}language"))
+    description = text_of(root.find(".//{http://purl.org/dc/elements/1.1/}description"))
+    return {"title": title, "authors": creators, "language": language, "description": description}
+
+
+def epub_metadata(path: Path) -> dict:
+    try:
+        with zipfile.ZipFile(path) as archive:
+            container = ET.fromstring(archive.read("META-INF/container.xml"))
+            node = container.find(".//{urn:oasis:names:tc:opendocument:xmlns:container}rootfile")
+            if node is None:
+                return {}
+            opf_path = node.attrib.get("full-path", "")
+            return parse_opf_bytes(archive.read(opf_path))
+    except (OSError, KeyError, zipfile.BadZipFile, ET.ParseError):
+        return {}
+
+
+def sidecar_metadata(directory: Path) -> dict:
+    opf = directory / "metadata.opf"
+    try:
+        return parse_opf_bytes(opf.read_bytes()) if opf.is_file() else {}
+    except OSError:
+        return {}
+
+
+def clean_stem(value: str) -> str:
+    result = re.sub(r"\s+-\s+[^-]{2,80}$", "", value)
+    result = re.sub(r"\s*\(\d+\)$", "", result)
+    result = re.sub(r"[_\s]+", " ", result).strip(" ._-")
+    return result or "Untitled"
+
+
+def stable_id(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8", "surrogateescape")).hexdigest()[:20]
+
+
+def safe_cover_from_epub(path: Path, book_id: str) -> str:
+    target = CACHE_DIR / "covers" / f"{book_id}.jpg"
+    if target.is_file() and target.stat().st_mtime >= path.stat().st_mtime:
+        return str(target)
+    try:
+        with zipfile.ZipFile(path) as archive:
+            container = ET.fromstring(archive.read("META-INF/container.xml"))
+            node = container.find(".//{urn:oasis:names:tc:opendocument:xmlns:container}rootfile")
+            opf_name = node.attrib.get("full-path", "") if node is not None else ""
+            root = ET.fromstring(archive.read(opf_name))
+            cover_id = ""
+            for meta in root.findall(".//{*}meta"):
+                if meta.attrib.get("name", "").lower() == "cover":
+                    cover_id = meta.attrib.get("content", "")
+                    break
+                if meta.attrib.get("property", "").lower() == "cover-image":
+                    cover_id = meta.attrib.get("refines", "").lstrip("#")
+                    break
+            item = None
+            for candidate in root.findall(".//{*}item"):
+                props = candidate.attrib.get("properties", "").split()
+                if candidate.attrib.get("id") == cover_id or "cover-image" in props:
+                    item = candidate
+                    break
+            if item is None:
+                return ""
+            member = str((Path(opf_name).parent / item.attrib.get("href", "")).as_posix())
+            if member.startswith("../") or member.startswith("/"):
+                return ""
+            data = archive.read(member)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+            return str(target)
+    except (OSError, KeyError, zipfile.BadZipFile, ET.ParseError):
+        return ""
+
+
+def scan_library(force: bool = False) -> list[dict]:
+    cfg = settings()
+    root = Path(cfg["libraryFolder"])
+    if not root.is_dir():
+        return []
+    cache = read_json(INDEX_FILE, {})
+    if not isinstance(cache, dict):
+        cache = {}
+    records = cache.get("records", {}) if cache.get("root") == str(root) else {}
+    progress = read_json(PROGRESS_FILE, {})
+    if not isinstance(progress, dict):
+        progress = {}
+    groups: dict[str, list[Path]] = {}
+    count = 0
+    for base, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if not d.startswith(".") and d not in {"node_modules", "__pycache__"}]
+        for name in files:
+            suffix = Path(name).suffix.lower().lstrip(".")
+            if suffix not in SUPPORTED:
+                continue
+            path = Path(base) / name
+            try:
+                relative_parent = path.parent.relative_to(root)
+            except ValueError:
+                continue
+            group_key = str(relative_parent) if relative_parent != Path(".") else clean_stem(path.stem).casefold()
+            groups.setdefault(group_key, []).append(path)
+            count += 1
+            if count >= 15000:
+                break
+        if count >= 15000:
+            break
+    books: list[dict] = []
+    next_records: dict[str, dict] = {}
+    for group_key, paths in groups.items():
+        paths.sort(key=lambda p: (FORMAT_PRIORITY.index(p.suffix.lower().lstrip(".")), str(p))
+                   if p.suffix.lower().lstrip(".") in FORMAT_PRIORITY else (999, str(p)))
+        primary = paths[0]
+        book_id = stable_id(str(root) + "\0" + group_key)
+        signature = "|".join(f"{p}:{p.stat().st_mtime_ns}:{p.stat().st_size}" for p in paths)
+        cached = records.get(book_id, {}) if not force else {}
+        if cached.get("signature") == signature:
+            book = dict(cached.get("book", {}))
+        else:
+            metadata = sidecar_metadata(primary.parent)
+            if not metadata and primary.suffix.lower() == ".epub":
+                metadata = epub_metadata(primary)
+            title = metadata.get("title") or clean_stem(primary.stem)
+            authors = metadata.get("authors") or []
+            if isinstance(authors, str):
+                authors = [authors]
+            cover_path = primary.parent / "cover.jpg"
+            cover = str(cover_path) if cover_path.is_file() else ""
+            if not cover:
+                epub_path = next((p for p in paths if p.suffix.lower() == ".epub"), None)
+                if epub_path:
+                    cover = safe_cover_from_epub(epub_path, book_id)
+            book = {
+                "id": book_id,
+                "title": title,
+                "authors": authors,
+                "author": " & ".join(authors) if authors else "Unknown author",
+                "path": str(primary),
+                "format": primary.suffix.lower().lstrip("."),
+                "formats": [p.suffix.lower().lstrip(".") for p in paths],
+                "files": {p.suffix.lower().lstrip("."): str(p) for p in paths},
+                "cover": cover,
+                "language": metadata.get("language", ""),
+                "description": metadata.get("description", ""),
+                "added": datetime.fromtimestamp(primary.stat().st_mtime, timezone.utc).isoformat(),
+            }
+        state = progress.get("books", {}).get(book_id, {}) if isinstance(progress.get("books", {}), dict) else {}
+        book["progress"] = max(0.0, min(1.0, float(state.get("percentage", 0) or 0)))
+        book["lastOpened"] = str(state.get("lastOpened", ""))
+        book["chapter"] = str(state.get("chapter", ""))
+        books.append(book)
+        next_records[book_id] = {"signature": signature, "book": {k: v for k, v in book.items() if k not in {"progress", "lastOpened", "chapter"}}}
+    atomic_json(INDEX_FILE, {"root": str(root), "generated": utc_now(), "records": next_records})
+    sorter = cfg["sort"]
+    if sorter == "title":
+        books.sort(key=lambda b: (b["title"].casefold(), b["author"].casefold()))
+    elif sorter == "author":
+        books.sort(key=lambda b: (b["author"].casefold(), b["title"].casefold()))
+    elif sorter == "added":
+        books.sort(key=lambda b: b["added"], reverse=True)
+    else:
+        books.sort(key=lambda b: (b["title"].casefold(), b["author"].casefold()))
+        books.sort(key=lambda b: b["lastOpened"], reverse=True)
+    return books
+
+
+def progress_state() -> dict:
+    value = read_json(PROGRESS_FILE, {"lastBookId": "", "books": {}})
+    if not isinstance(value, dict):
+        return {"lastBookId": "", "books": {}}
+    value.setdefault("lastBookId", "")
+    value.setdefault("books", {})
+    return value
+
+
+def update_progress(book_id: str, change: dict) -> dict:
+    state = progress_state()
+    books = state["books"]
+    current = books.get(book_id, {}) if isinstance(books.get(book_id, {}), dict) else {}
+    allowed = {"cfi", "percentage", "chapter", "bookmarks", "lastOpened"}
+    current.update({k: v for k, v in change.items() if k in allowed})
+    current["lastOpened"] = utc_now()
+    current["percentage"] = max(0.0, min(1.0, float(current.get("percentage", 0) or 0)))
+    if not isinstance(current.get("bookmarks", []), list):
+        current["bookmarks"] = []
+    books[book_id] = current
+    state["lastBookId"] = book_id
+    atomic_json(PROGRESS_FILE, state)
+    return current
+
+
+def library_payload(force: bool = False, query: str = "", limit: int = 0) -> dict:
+    books = scan_library(force=force)
+    if query:
+        needle = query.casefold()
+        books = [b for b in books if needle in f"{b['title']} {b['author']} {' '.join(b['formats'])}".casefold()]
+    if limit > 0:
+        books = books[:limit]
+    state = progress_state()
+    return {
+        "ok": True,
+        "books": books,
+        "count": len(books),
+        "lastBookId": state.get("lastBookId", ""),
+        "settings": settings(),
+        "converterAvailable": shutil.which("ebook-convert") is not None,
+    }
+
+
+def find_book(book_id: str) -> dict | None:
+    return next((book for book in scan_library() if book["id"] == book_id), None)
+
+
+def readable_file(book: dict) -> Path:
+    files = book.get("files", {})
+    if files.get("epub"):
+        return Path(files["epub"])
+    if files.get("pdf"):
+        return Path(files["pdf"])
+    source = Path(book["path"])
+    fmt = source.suffix.lower().lstrip(".")
+    if fmt not in CONVERTIBLE:
+        raise RuntimeError(f"{fmt.upper()} reading is not available yet")
+    converter = shutil.which("ebook-convert")
+    if not converter:
+        raise RuntimeError(f"{fmt.upper()} requires the optional Calibre converter (ebook-convert)")
+    target = CACHE_DIR / "converted" / f"{book['id']}.epub"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if not target.exists() or target.stat().st_mtime < source.stat().st_mtime:
+        temporary = target.with_suffix(".working.epub")
+        result = subprocess.run([converter, str(source), str(temporary)], capture_output=True, text=True, timeout=300)
+        if result.returncode != 0 or not temporary.is_file():
+            temporary.unlink(missing_ok=True)
+            detail = (result.stderr or result.stdout).strip().splitlines()
+            raise RuntimeError(detail[-1] if detail else f"Could not convert {fmt.upper()}")
+        os.replace(temporary, target)
+    return target
+
+
+def server_info() -> dict:
+    value = read_json(SERVER_FILE, {})
+    return value if isinstance(value, dict) else {}
+
+
+def server_alive(info: dict | None = None) -> bool:
+    info = info or server_info()
+    pid = int(info.get("pid", 0) or 0)
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+class ReaderHandler(BaseHTTPRequestHandler):
+    server_version = "LeafReader/1.0"
+
+    def log_message(self, fmt: str, *args: object) -> None:
+        return
+
+    def send_bytes(self, data: bytes, content_type: str, status: int = 200, cache: str = "no-store") -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", cache)
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Content-Security-Policy", "default-src 'self' blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-src blob: 'self'")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def send_json(self, value: object, status: int = 200) -> None:
+        self.send_bytes(json.dumps(value, ensure_ascii=False).encode(), "application/json; charset=utf-8", status)
+
+    def route(self) -> tuple[str, dict[str, list[str]]]:
+        parsed = urllib.parse.urlsplit(self.path)
+        return parsed.path, urllib.parse.parse_qs(parsed.query)
+
+    def do_GET(self) -> None:
+        route, query = self.route()
+        if route == "/api/bootstrap":
+            payload = library_payload(query=query.get("q", [""])[0])
+            payload["token"] = self.server.token
+            payload["progressState"] = progress_state()
+            self.send_json(payload)
+            return
+        if route.startswith("/api/book/"):
+            book_id = route.rsplit("/", 1)[-1]
+            book = find_book(book_id)
+            if not book:
+                self.send_json({"ok": False, "error": "Book not found"}, 404)
+                return
+            try:
+                path = readable_file(book)
+                data = path.read_bytes()
+            except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 422)
+                return
+            mime = "application/pdf" if path.suffix.lower() == ".pdf" else "application/epub+zip"
+            self.send_bytes(data, mime, cache="private, max-age=3600")
+            return
+        if route.startswith("/api/cover/"):
+            book = find_book(route.rsplit("/", 1)[-1])
+            cover = Path(book["cover"]) if book and book.get("cover") else None
+            if not cover or not cover.is_file():
+                self.send_bytes(b"", "image/jpeg", 404)
+                return
+            mime = mimetypes.guess_type(cover.name)[0] or "image/jpeg"
+            self.send_bytes(cover.read_bytes(), mime, cache="private, max-age=86400")
+            return
+        relative = "index.html" if route in {"/", "/reader"} else route.lstrip("/")
+        target = (WEB_DIR / relative).resolve()
+        try:
+            target.relative_to(WEB_DIR.resolve())
+        except ValueError:
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        if not target.is_file():
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        mime = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+        self.send_bytes(target.read_bytes(), mime, cache="no-cache")
+
+    def do_POST(self) -> None:
+        if self.headers.get("X-Leaf-Token", "") != self.server.token:
+            self.send_json({"ok": False, "error": "Invalid request token"}, 403)
+            return
+        try:
+            length = min(int(self.headers.get("Content-Length", "0")), 1_000_000)
+            payload = json.loads(self.rfile.read(length) or b"{}")
+        except (ValueError, TypeError):
+            self.send_json({"ok": False, "error": "Invalid JSON"}, 400)
+            return
+        route, _ = self.route()
+        if route.startswith("/api/progress/"):
+            book_id = route.rsplit("/", 1)[-1]
+            if not find_book(book_id):
+                self.send_json({"ok": False, "error": "Book not found"}, 404)
+                return
+            self.send_json({"ok": True, "progress": update_progress(book_id, payload)})
+            return
+        if route == "/api/settings":
+            allowed = {"fontSize", "fontFamily", "lineHeight", "pageWidth", "theme", "flow", "showClock", "sort"}
+            self.send_json({"ok": True, "settings": save_settings({k: v for k, v in payload.items() if k in allowed})})
+            return
+        self.send_json({"ok": False, "error": "Not found"}, 404)
+
+
+class ReaderServer(ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def __init__(self, address: tuple[str, int], token: str):
+        self.token = token
+        super().__init__(address, ReaderHandler)
+
+
+def serve() -> int:
+    token = secrets.token_urlsafe(24)
+    server = ReaderServer(("127.0.0.1", PORT), token)
+    atomic_json(SERVER_FILE, {"pid": os.getpid(), "port": PORT, "token": token, "started": utc_now()})
+    try:
+        server.serve_forever(poll_interval=0.4)
+    finally:
+        if server_info().get("pid") == os.getpid():
+            SERVER_FILE.unlink(missing_ok=True)
+    return 0
+
+
+def start_server() -> dict:
+    info = server_info()
+    if server_alive(info):
+        return {"ok": True, "url": f"http://127.0.0.1:{info.get('port', PORT)}/", "pid": info.get("pid")}
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "serve"], stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    for _ in range(50):
+        time.sleep(0.05)
+        info = server_info()
+        if server_alive(info):
+            return {"ok": True, "url": f"http://127.0.0.1:{info.get('port', PORT)}/", "pid": info.get("pid")}
+    return {"ok": False, "error": "Reader service did not start"}
+
+
+def parser() -> argparse.ArgumentParser:
+    result = argparse.ArgumentParser(description="Leaf Reader local helper")
+    sub = result.add_subparsers(dest="command", required=True)
+    lib = sub.add_parser("library")
+    lib.add_argument("--refresh", action="store_true")
+    lib.add_argument("--query", default="")
+    lib.add_argument("--limit", type=int, default=0)
+    sub.add_parser("start")
+    sub.add_parser("serve")
+    choose = sub.add_parser("choose-folder")
+    choose.add_argument("--folder")
+    config = sub.add_parser("settings")
+    config.add_argument("--library-folder")
+    config.add_argument("--font-size", type=int)
+    config.add_argument("--font-family", choices=sorted(FONTS))
+    config.add_argument("--line-height", type=float)
+    config.add_argument("--page-width", type=int)
+    config.add_argument("--theme", choices=sorted(THEMES))
+    config.add_argument("--flow", choices=sorted(FLOWS))
+    config.add_argument("--sort", choices=["recent", "title", "author", "added"])
+    config.add_argument("--show-clock", choices=["true", "false"])
+    mark = sub.add_parser("mark-opened")
+    mark.add_argument("book_id")
+    sub.add_parser("doctor")
+    return result
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parser().parse_args(argv)
+    if args.command == "serve":
+        return serve()
+    if args.command == "library":
+        print(json.dumps(library_payload(args.refresh, args.query, args.limit), ensure_ascii=False))
+        return 0
+    if args.command == "start":
+        print(json.dumps(start_server()))
+        return 0
+    if args.command == "choose-folder":
+        chosen = args.folder
+        if not chosen:
+            picker = shutil.which("zenity")
+            if not picker:
+                print(json.dumps({"ok": False, "error": "Folder picker is unavailable; enter the path manually."}))
+                return 1
+            run = subprocess.run([picker, "--file-selection", "--directory", "--title=Choose your ebook library"], capture_output=True, text=True)
+            if run.returncode != 0:
+                print(json.dumps({"ok": False, "cancelled": True}))
+                return 0
+            chosen = run.stdout.strip()
+        folder = Path(os.path.expanduser(chosen)).resolve()
+        if not folder.is_dir():
+            print(json.dumps({"ok": False, "error": "That folder does not exist."}))
+            return 1
+        print(json.dumps({"ok": True, "settings": save_settings({"libraryFolder": str(folder)})}))
+        return 0
+    if args.command == "settings":
+        changes = {}
+        for key, dest in [("library_folder", "libraryFolder"), ("font_size", "fontSize"),
+                          ("font_family", "fontFamily"), ("line_height", "lineHeight"),
+                          ("page_width", "pageWidth"), ("theme", "theme"),
+                          ("flow", "flow"), ("sort", "sort")]:
+            value = getattr(args, key)
+            if value is not None:
+                changes[dest] = value
+        if args.show_clock is not None:
+            changes["showClock"] = args.show_clock == "true"
+        if args.library_folder and not Path(os.path.expanduser(args.library_folder)).is_dir():
+            print(json.dumps({"ok": False, "error": "That folder does not exist."}))
+            return 1
+        print(json.dumps({"ok": True, "settings": save_settings(changes)}))
+        return 0
+    if args.command == "mark-opened":
+        if not find_book(args.book_id):
+            print(json.dumps({"ok": False, "error": "Book not found"}))
+            return 1
+        print(json.dumps({"ok": True, "progress": update_progress(args.book_id, {})}))
+        return 0
+    if args.command == "doctor":
+        cfg = settings()
+        result = {
+            "ok": WEB_DIR.is_dir() and (WEB_DIR / "vendor/epub.min.js").is_file(),
+            "libraryFolder": cfg["libraryFolder"],
+            "libraryExists": Path(cfg["libraryFolder"]).is_dir(),
+            "books": len(scan_library()),
+            "epubRenderer": (WEB_DIR / "vendor/epub.min.js").is_file(),
+            "converter": shutil.which("ebook-convert") or "",
+            "qtWebEngine": Path("/usr/lib/qt6/qml/QtWebEngine").is_dir(),
+        }
+        print(json.dumps(result, indent=2))
+        return 0 if result["ok"] else 1
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

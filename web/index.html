@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Leaf Reader</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <div id="app" class="theme-paper">
+    <header id="toolbar" class="toolbar" aria-label="Reader controls">
+      <div class="toolbar-side toolbar-left">
+        <button id="libraryButton" class="icon-button" title="Library (L)" aria-label="Open library">
+          <span aria-hidden="true">☰</span>
+        </button>
+        <button id="tocButton" class="icon-button" title="Contents (T)" aria-label="Open table of contents">
+          <span aria-hidden="true">≡</span>
+        </button>
+      </div>
+      <div class="book-heading">
+        <strong id="bookTitle">Leaf Reader</strong>
+        <span id="chapterTitle">Opening your book…</span>
+      </div>
+      <div class="toolbar-side toolbar-right">
+        <button id="searchButton" class="icon-button" title="Search (/)" aria-label="Search book">⌕</button>
+        <button id="bookmarkButton" class="icon-button" title="Bookmark (B)" aria-label="Bookmark this page">◇</button>
+        <button id="appearanceButton" class="icon-button" title="Reading settings (A)" aria-label="Reading settings">Aa</button>
+      </div>
+    </header>
+
+    <main id="readerShell">
+      <button id="previousZone" class="page-zone page-zone-left" aria-label="Previous page"></button>
+      <div id="viewer" aria-label="Book page"></div>
+      <iframe id="pdfViewer" title="PDF reader"></iframe>
+      <button id="nextZone" class="page-zone page-zone-right" aria-label="Next page"></button>
+      <div id="loading" class="loading">
+        <span class="leaf-mark">❧</span>
+        <p id="loadingText">Opening your book…</p>
+      </div>
+      <div id="error" class="error-state" hidden>
+        <span class="leaf-mark">❧</span>
+        <h1>This book could not be opened</h1>
+        <p id="errorText"></p>
+        <button id="errorLibraryButton" class="primary-button">Return to library</button>
+      </div>
+    </main>
+
+    <footer id="progressBar" class="progress-bar">
+      <span id="pageLabel">—</span>
+      <input id="progressSlider" type="range" min="0" max="1000" value="0" aria-label="Reading progress">
+      <span id="percentLabel">0%</span>
+    </footer>
+
+    <div id="scrim" class="scrim" hidden></div>
+
+    <aside id="libraryDrawer" class="drawer drawer-wide" aria-label="Library" aria-hidden="true">
+      <div class="drawer-header">
+        <div>
+          <span class="eyebrow">YOUR BOOKS</span>
+          <h1>Library</h1>
+        </div>
+        <button class="icon-button close-drawer" aria-label="Close library">×</button>
+      </div>
+      <label class="search-field">
+        <span>⌕</span>
+        <input id="librarySearch" type="search" placeholder="Search title or author" autocomplete="off">
+      </label>
+      <div id="libraryGrid" class="library-grid"></div>
+      <div id="emptyLibrary" class="drawer-empty" hidden>
+        <span class="leaf-mark">❧</span>
+        <p>No books match this search.</p>
+      </div>
+    </aside>
+
+    <aside id="tocDrawer" class="drawer" aria-label="Table of contents" aria-hidden="true">
+      <div class="drawer-header">
+        <div><span class="eyebrow">NAVIGATE</span><h1>Contents</h1></div>
+        <button class="icon-button close-drawer" aria-label="Close contents">×</button>
+      </div>
+      <nav id="tocList" class="toc-list"></nav>
+      <section class="bookmark-section">
+        <div class="section-title"><span>Bookmarks</span><span id="bookmarkCount">0</span></div>
+        <div id="bookmarkList" class="bookmark-list"></div>
+      </section>
+    </aside>
+
+    <aside id="searchDrawer" class="drawer" aria-label="Search this book" aria-hidden="true">
+      <div class="drawer-header">
+        <div><span class="eyebrow">FIND IN BOOK</span><h1>Search</h1></div>
+        <button class="icon-button close-drawer" aria-label="Close search">×</button>
+      </div>
+      <label class="search-field">
+        <span>⌕</span>
+        <input id="bookSearch" type="search" placeholder="Words or phrase" autocomplete="off">
+      </label>
+      <p id="searchStatus" class="helper-copy">Type at least two characters.</p>
+      <div id="searchResults" class="search-results"></div>
+    </aside>
+
+    <aside id="appearanceDrawer" class="drawer" aria-label="Reading settings" aria-hidden="true">
+      <div class="drawer-header">
+        <div><span class="eyebrow">MAKE IT YOURS</span><h1>Reading</h1></div>
+        <button class="icon-button close-drawer" aria-label="Close settings">×</button>
+      </div>
+
+      <section class="setting-section">
+        <label>Text size</label>
+        <div class="stepper">
+          <button id="fontSmaller" aria-label="Smaller text">A−</button>
+          <output id="fontSizeLabel">20 px</output>
+          <button id="fontLarger" aria-label="Larger text">A+</button>
+        </div>
+      </section>
+
+      <section class="setting-section">
+        <label>Typeface</label>
+        <div id="fontChoices" class="choice-row three">
+          <button data-value="serif" class="serif-sample">Serif</button>
+          <button data-value="sans" class="sans-sample">Sans</button>
+          <button data-value="publisher">Book</button>
+        </div>
+      </section>
+
+      <section class="setting-section">
+        <label>Page color</label>
+        <div id="themeChoices" class="theme-choices">
+          <button data-value="paper" title="Paper"><span class="swatch paper"></span>Paper</button>
+          <button data-value="sepia" title="Sepia"><span class="swatch sepia"></span>Sepia</button>
+          <button data-value="slate" title="Slate"><span class="swatch slate"></span>Slate</button>
+          <button data-value="night" title="Night"><span class="swatch night"></span>Night</button>
+        </div>
+      </section>
+
+      <section class="setting-section">
+        <label for="lineHeight">Line spacing <output id="lineHeightLabel"></output></label>
+        <input id="lineHeight" type="range" min="1.25" max="2.2" step="0.05">
+      </section>
+
+      <section class="setting-section">
+        <label for="pageWidth">Reading width <output id="pageWidthLabel"></output></label>
+        <input id="pageWidth" type="range" min="520" max="1100" step="20">
+      </section>
+
+      <section class="setting-section">
+        <label>Layout</label>
+        <div id="flowChoices" class="choice-row">
+          <button data-value="paginated">Pages</button>
+          <button data-value="scrolled">Scroll</button>
+        </div>
+      </section>
+
+      <p class="shortcut-help">← → turn pages · / search · B bookmark · A appearance · L library</p>
+    </aside>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </div>
+  <script src="vendor/jszip.min.js"></script>
+  <script src="vendor/epub.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
