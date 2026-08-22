@@ -2,7 +2,13 @@
 
 Leaf Reader turns the Omarchy bar into a calm, local-first ebook library. Click the book icon to browse your covers; right-click it to jump straight back into the last book and exact location you were reading.
 
-![Leaf Reader in distraction-free reading mode](preview.png)
+![Leaf Reader's native Omarchy library dropdown](assets/leaf-reader-panel.png)
+
+_The native Omarchy dropdown keeps your local library, current book, search, and reader settings one click away._
+
+![Leaf Reader in distraction-free two-page reading mode](preview.png)
+
+_Reading mode opens as a quiet two-page spread with controls that disappear until you deliberately call them back._
 
 The library panel is compact and native to the Omarchy shell. Reading opens in a separate native Qt window designed to disappear around the page: quiet typography, restrained controls, no accounts, no cloud, and no library management ceremony. The separate process keeps the shell isolated from the comparatively heavy WebEngine renderer.
 
