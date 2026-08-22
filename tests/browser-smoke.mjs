@@ -171,7 +171,28 @@ try {
 
   const capture = await call("Page.captureScreenshot", { format: "png", fromSurface: true });
   fs.writeFileSync(screenshotPath, Buffer.from(capture.data, "base64"));
-  await evaluate("saveSettings({ theme: 'paper' })", true);
+
+  const themeRoundTrip = await evaluate(`(async () => {
+    const inspect = () => {
+      const frame = document.querySelector('#viewer iframe');
+      const sample = frame?.contentDocument?.querySelector('p, h1, h2, h3, li, blockquote');
+      return {
+        bodyBackground: frame?.contentDocument ? getComputedStyle(frame.contentDocument.body).backgroundColor : '',
+        textColor: sample ? getComputedStyle(sample).color : ''
+      };
+    };
+    await saveSettings({ theme: 'sepia' });
+    await new Promise(resolve => setTimeout(resolve, 600));
+    const sepia = inspect();
+    await saveSettings({ theme: 'paper' });
+    await new Promise(resolve => setTimeout(resolve, 600));
+    const paper = inspect();
+    return { sepia, paper };
+  })()`, true);
+  assert(themeRoundTrip.sepia.bodyBackground === "rgb(244, 234, 214)", `Unexpected Sepia background: ${themeRoundTrip.sepia.bodyBackground}`);
+  assert(themeRoundTrip.sepia.textColor === "rgb(55, 44, 34)", `Night text color leaked into Sepia: ${themeRoundTrip.sepia.textColor}`);
+  assert(themeRoundTrip.paper.bodyBackground === "rgb(255, 253, 248)", `Unexpected Paper background: ${themeRoundTrip.paper.bodyBackground}`);
+  assert(themeRoundTrip.paper.textColor === "rgb(40, 35, 31)", `Night text color leaked into Paper: ${themeRoundTrip.paper.textColor}`);
 
   assert(errors.length === 0, `Browser errors: ${errors.join(" | ")}`);
   console.log(JSON.stringify({
@@ -186,6 +207,7 @@ try {
     controlsStayedHidden: true,
     readableCharacters: readableText.length,
     nightTheme: dark,
+    themeRoundTrip,
     screenshot: screenshotPath,
     browserErrors: errors,
   }, null, 2));

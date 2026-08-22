@@ -37,8 +37,14 @@ function setTheme(name) {
 
 function contentTheme() {
   const map = {
-    paper: { body: { color: "#28231f", background: "#fffdf8" }, a: { color: "#8c5731" } },
-    sepia: { body: { color: "#372c22", background: "#f4ead6" }, a: { color: "#8a552f" } },
+    paper: {
+      body: { color: "#28231f", background: "#fffdf8" },
+      "body *": { color: "#28231f !important" }, "a, a *": { color: "#8c5731 !important" },
+    },
+    sepia: {
+      body: { color: "#372c22", background: "#f4ead6" },
+      "body *": { color: "#372c22 !important" }, "a, a *": { color: "#8a552f !important" },
+    },
     slate: {
       body: { color: "#e8edef", background: "#313c43" },
       "body *": { color: "#e8edef !important" }, "a, a *": { color: "#a9cad8 !important" },
