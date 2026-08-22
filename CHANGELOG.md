@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.3 — 2026-08-22
+
+- Reject covers larger than 8 MiB, 4096 pixels on either side, or 12 megapixels before decoding
+- Decode JPEG/PNG covers in a short-lived, resource-limited ImageMagick process and cache only verified 512×768 PNG thumbnails
+- Keep raw EPUB and sidecar cover bytes out of the long-running Omarchy shell and add explicit QML decode-size bounds
+- Invalidate older cover records so existing libraries are safely reprocessed on their next scan
+
 ## 1.1.2 — 2026-08-21
 
 - Force ebook title, author, and status metadata to render as plain text in the native library panel
