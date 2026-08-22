@@ -17,8 +17,8 @@ The library panel is compact and native to the Omarchy shell. Reading opens in a
 - Reads PDF through Qt WebEngine's built-in viewer
 - Supports AZW3, MOBI, AZW, PRC, FB2, FBZ, HTMLZ, RTF, TXT, and TXTZ when the optional `ebook-convert` command is available
 - Includes title/author search, table of contents, in-book search, bookmarks, progress scrubbing, and keyboard navigation
-- Provides text size, serif/sans/publisher fonts, line spacing, reading width, page/scroll layouts, and Paper, Sepia, Slate, and Night themes
-- Adds a tactile Meditations-inspired page turn in paginated mode, with an automatic reduced-motion fallback
+- Provides text size, serif/sans/publisher fonts, line spacing, per-page width, page/scroll layouts, and Paper, Sepia, Slate, and Night themes
+- Adds a tactile Meditations-inspired page turn across a two-page spread, with an off switch and automatic reduced-motion fallback
 - Keeps page turns distraction-free: navigation never wakes the reader controls
 - Stores state under XDG state/cache folders and never uploads book data
 

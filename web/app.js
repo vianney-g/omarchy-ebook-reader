@@ -62,6 +62,7 @@ function applyAppearance(redisplay = true) {
   document.documentElement.style.setProperty("--reader-width", `${state.settings.pageWidth}px`);
   $$("#fontChoices button").forEach(button => button.classList.toggle("active", button.dataset.value === state.settings.fontFamily));
   $$("#flowChoices button").forEach(button => button.classList.toggle("active", button.dataset.value === state.settings.flow));
+  $$("#pageTurnChoices button").forEach(button => button.classList.toggle("active", (button.dataset.value === "true") === state.settings.pageTurn));
   if (!state.rendition) return;
   state.rendition.themes.default(contentTheme());
   const family = state.settings.fontFamily === "publisher" ? "inherit" :
@@ -291,7 +292,7 @@ async function openBook(bookId) {
     state.epub = ePub(await response.arrayBuffer());
     await state.epub.ready;
     const flow = state.settings.flow === "scrolled" ? "scrolled-doc" : "paginated";
-    state.rendition = state.epub.renderTo("viewer", { width: "100%", height: "100%", flow, spread: "auto", minSpreadWidth: 1100 });
+    state.rendition = state.epub.renderTo("viewer", { width: "100%", height: "100%", flow, spread: "auto", minSpreadWidth: 800 });
     applyAppearance(false);
     state.rendition.on("relocated", onRelocated);
     state.rendition.on("rendered", (_, view) => {
@@ -344,7 +345,7 @@ function onRelocated(location) {
 function navigate(direction) {
   if (!state.rendition || state.turning) return;
   const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  if (state.settings.flow !== "paginated" || reducedMotion) {
+  if (state.settings.flow !== "paginated" || state.settings.pageTurn === false || reducedMotion) {
     direction < 0 ? state.rendition.prev() : state.rendition.next();
     return;
   }
@@ -430,6 +431,9 @@ function bindControls() {
   $$("#flowChoices button").forEach(button => button.addEventListener("click", async () => {
     await saveSettings({ flow: button.dataset.value });
     if (state.book) openBook(state.book.id);
+  }));
+  $$("#pageTurnChoices button").forEach(button => button.addEventListener("click", () => {
+    saveSettings({ pageTurn: button.dataset.value === "true" });
   }));
   $("#lineHeight").addEventListener("input", event => { state.settings.lineHeight = Number(event.target.value); applyAppearance(false); });
   $("#lineHeight").addEventListener("change", event => saveSettings({ lineHeight: Number(event.target.value) }));

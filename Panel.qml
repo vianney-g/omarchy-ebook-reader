@@ -502,6 +502,30 @@ Panel {
               }
             }
 
+            Column {
+              width: parent.width; spacing: Style.space(8)
+              Text { text: "PAGE TURN EFFECT"; color: root.muted; font.family: root.fontFamily; font.pixelSize: Style.font.caption; font.bold: true; font.letterSpacing: 1 }
+              Row {
+                spacing: Style.space(8)
+                Repeater {
+                  model: [
+                    { name: "On", value: true },
+                    { name: "Off", value: false }
+                  ]
+                  delegate: Rectangle {
+                    required property var modelData
+                    width: Style.space(120); height: Style.space(40); radius: Style.cornerRadius
+                    color: (root.readerSettings.pageTurn !== false) === modelData.value ? root.subtle : "transparent"
+                    border.width: (root.readerSettings.pageTurn !== false) === modelData.value ? 1 : 0
+                    border.color: root.accent
+                    Text { anchors.centerIn: parent; text: modelData.name; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.body }
+                    TapHandler { onTapped: root.saveSetting(["--page-turn", modelData.value ? "true" : "false"]) }
+                  }
+                }
+              }
+              Text { text: "Turn it off for an instant, motion-free page change."; color: root.muted; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
+            }
+
             Row {
               width: parent.width; spacing: Style.space(18)
               Column {

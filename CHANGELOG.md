@@ -5,9 +5,10 @@
 - Four reviewed public-domain starter books for an immediately useful offline shelf
 - Fresh installs prefer an existing `~/Books` library, then fall back to the bundled starter shelf
 - Crisper Noto Serif/Noto Sans rendering across the reader and library panel
-- Correct viewport-based reading width that preserves publisher pagination
+- Correct two-page viewport width that preserves publisher pagination and the book-like spread
 - Page turns no longer wake the top and bottom reader controls
 - Controls now respond deliberately to pointer movement, click/tap, and Escape
+- Optional page-turn effect, controllable from both reader appearance and Omarchy settings
 - Current Omarchy panel-switching contract and single-instance manifest declaration
 - Conflict-free ephemeral loopback port passed explicitly to the native reader
 - Off-the-record WebEngine profile with outbound networking disabled for book content

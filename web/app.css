@@ -64,13 +64,13 @@ body {
 #readerShell { position: absolute; inset: 0; background: var(--page); }
 #viewer {
   position: absolute; top: 76px; bottom: 48px; left: 50%;
-  width: min(calc(100% - 128px), var(--reader-width));
+  width: min(calc(100% - 128px), calc(var(--reader-width) * 2));
   transform: translateX(-50%);
 }
 #pdfViewer { position: absolute; inset: 66px 0 42px; width: 100%; height: calc(100% - 108px); border: 0; display: none; background: var(--page); }
 .page-turn-effect {
   position: absolute; top: 76px; bottom: 48px; left: 50%; z-index: 7; display: none;
-  width: min(calc(100% - 128px), var(--reader-width)); transform: translateX(-50%);
+  width: min(calc(100% - 128px), calc(var(--reader-width) * 2)); transform: translateX(-50%);
   perspective: 2400px; pointer-events: none; overflow: hidden;
 }
 .page-turn-effect.active { display: block; }

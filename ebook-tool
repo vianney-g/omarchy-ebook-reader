@@ -92,6 +92,7 @@ def default_settings() -> dict:
         "pageWidth": 760,
         "theme": "paper",
         "flow": "paginated",
+        "pageTurn": True,
         "showClock": False,
         "sort": "recent",
     }
@@ -105,6 +106,20 @@ def settings() -> dict:
     return validate_settings(result)
 
 
+def boolean_setting(value, fallback: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off"}:
+            return False
+    if isinstance(value, (int, float)) and value in {0, 1}:
+        return bool(value)
+    return fallback
+
+
 def validate_settings(value: dict) -> dict:
     result = default_settings()
     result.update(value)
@@ -116,7 +131,8 @@ def validate_settings(value: dict) -> dict:
     result["theme"] = result.get("theme") if result.get("theme") in THEMES else "paper"
     result["fontFamily"] = result.get("fontFamily") if result.get("fontFamily") in FONTS else "serif"
     result["flow"] = result.get("flow") if result.get("flow") in FLOWS else "paginated"
-    result["showClock"] = bool(result.get("showClock", False))
+    result["pageTurn"] = boolean_setting(result.get("pageTurn"), True)
+    result["showClock"] = boolean_setting(result.get("showClock"), False)
     result["sort"] = result.get("sort") if result.get("sort") in {"recent", "title", "author", "added"} else "recent"
     return result
 
@@ -506,7 +522,7 @@ class ReaderHandler(BaseHTTPRequestHandler):
             self.send_json({"ok": True, "progress": update_progress(book_id, payload)})
             return
         if route == "/api/settings":
-            allowed = {"fontSize", "fontFamily", "lineHeight", "pageWidth", "theme", "flow", "showClock", "sort"}
+            allowed = {"fontSize", "fontFamily", "lineHeight", "pageWidth", "theme", "flow", "pageTurn", "showClock", "sort"}
             self.send_json({"ok": True, "settings": save_settings({k: v for k, v in payload.items() if k in allowed})})
             return
         self.send_json({"ok": False, "error": "Not found"}, 404)
@@ -668,6 +684,7 @@ def parser() -> argparse.ArgumentParser:
     config.add_argument("--page-width", type=int)
     config.add_argument("--theme", choices=sorted(THEMES))
     config.add_argument("--flow", choices=sorted(FLOWS))
+    config.add_argument("--page-turn", choices=["true", "false"])
     config.add_argument("--sort", choices=["recent", "title", "author", "added"])
     config.add_argument("--show-clock", choices=["true", "false"])
     mark = sub.add_parser("mark-opened")
@@ -719,6 +736,8 @@ def main(argv: list[str] | None = None) -> int:
                 changes[dest] = value
         if args.show_clock is not None:
             changes["showClock"] = args.show_clock == "true"
+        if args.page_turn is not None:
+            changes["pageTurn"] = args.page_turn == "true"
         if args.library_folder and not Path(os.path.expanduser(args.library_folder)).is_dir():
             print(json.dumps({"ok": False, "error": "That folder does not exist."}))
             return 1

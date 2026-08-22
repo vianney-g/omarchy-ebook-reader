@@ -101,6 +101,7 @@ class LeafReaderTests(unittest.TestCase):
         result = leaf.save_settings({
             "libraryFolder": str(self.library), "fontSize": 99, "lineHeight": 0.5,
             "pageWidth": 4000, "theme": "neon", "fontFamily": "comic", "flow": "flipbook",
+            "pageTurn": False,
         })
         self.assertEqual(result["fontSize"], 36)
         self.assertEqual(result["lineHeight"], 1.25)
@@ -108,6 +109,13 @@ class LeafReaderTests(unittest.TestCase):
         self.assertEqual(result["theme"], "paper")
         self.assertEqual(result["fontFamily"], "serif")
         self.assertEqual(result["flow"], "paginated")
+        self.assertFalse(result["pageTurn"])
+
+    def test_boolean_settings_are_tolerant_of_saved_json_values(self):
+        self.assertFalse(leaf.validate_settings({"pageTurn": "off"})["pageTurn"])
+        self.assertTrue(leaf.validate_settings({"pageTurn": "yes"})["pageTurn"])
+        self.assertTrue(leaf.validate_settings({"pageTurn": ["invalid"]})["pageTurn"])
+        self.assertFalse(leaf.validate_settings({"showClock": "false"})["showClock"])
 
     def test_index_cache_refreshes_when_book_changes(self):
         path = self.library / "Book.epub"
