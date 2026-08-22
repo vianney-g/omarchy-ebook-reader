@@ -48,6 +48,12 @@ Panel {
   function close() { root.controller.hide() }
   function toggle() { root.opened ? close() : open() }
 
+  function switchPanel(direction) {
+    if (root.bar && typeof root.bar.switchPanelFrom === "function")
+      return root.bar.switchPanelFrom(root.barIdentity, direction)
+    return false
+  }
+
   function refresh(force) {
     if (libraryProc.running || helperPath === "") return
     loading = true
@@ -167,6 +173,7 @@ Panel {
       anchors.fill: parent
       blocked: searchField.activeFocus || folderField.activeFocus
       onCloseRequested: root.close()
+      onTabRequested: function(direction) { root.switchPanel(direction) }
 
       Column {
         id: contentColumn
@@ -256,7 +263,7 @@ Panel {
                     anchors.centerIn: parent; width: parent.width - Style.space(10)
                     visible: parent.children[0].status !== Image.Ready
                     text: root.lastBook() ? String(root.lastBook().title || "") : ""
-                    color: root.foreground; font.family: "Georgia"; font.pixelSize: Style.font.caption; font.bold: true
+                    color: root.foreground; font.family: "Noto Serif"; font.pixelSize: Style.font.caption; font.bold: true
                     horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap; maximumLineCount: 4; elide: Text.ElideRight
                   }
                 }
@@ -268,7 +275,7 @@ Panel {
                   Text { text: "CONTINUE READING"; color: root.accent; font.family: root.fontFamily; font.pixelSize: Style.font.caption; font.bold: true; font.letterSpacing: 1 }
                   Text {
                     width: parent.width; text: root.lastBook() ? String(root.lastBook().title || "") : ""
-                    color: root.foreground; font.family: "Georgia"; font.pixelSize: Style.font.title; font.bold: true; elide: Text.ElideRight
+                    color: root.foreground; font.family: "Noto Serif"; font.pixelSize: Style.font.title; font.bold: true; elide: Text.ElideRight
                   }
                   Text {
                     width: parent.width; text: root.lastBook() ? String(root.lastBook().author || "") : ""
@@ -365,7 +372,7 @@ Panel {
                     anchors.centerIn: parent; width: parent.width - Style.space(14)
                     visible: bookImage.status !== Image.Ready
                     text: String(modelData.title || "")
-                    color: root.foreground; font.family: "Georgia"; font.pixelSize: Style.font.caption; font.bold: true
+                    color: root.foreground; font.family: "Noto Serif"; font.pixelSize: Style.font.caption; font.bold: true
                     horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap; maximumLineCount: 5; elide: Text.ElideRight
                   }
                   Rectangle {
@@ -381,7 +388,7 @@ Panel {
                 Text {
                   anchors { top: coverCard.bottom; topMargin: Style.space(7); left: parent.left; right: parent.right }
                   text: String(modelData.title || "")
-                  color: root.foreground; font.family: "Georgia"; font.pixelSize: Style.font.caption; font.bold: true
+                  color: root.foreground; font.family: "Noto Serif"; font.pixelSize: Style.font.caption; font.bold: true
                   horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight
                 }
                 Text {

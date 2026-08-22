@@ -6,7 +6,13 @@ import QtWebEngine
 QQC.ApplicationWindow {
   id: window
 
-  readonly property string readerUrl: "http://127.0.0.1:4189/"
+  readonly property string readerUrl: {
+    const prefix = "--leaf-reader-url="
+    for (const argument of Qt.application.arguments) {
+      if (argument.indexOf(prefix) === 0) return argument.slice(prefix.length)
+    }
+    return "http://127.0.0.1:4189/"
+  }
 
   visible: true
   visibility: Window.Maximized
@@ -56,14 +62,16 @@ QQC.ApplicationWindow {
         color: "#d8a06a"
         font.family: "Symbols Nerd Font"
         font.pixelSize: 17
+        renderType: Text.NativeRendering
       }
 
       Text {
         text: "Leaf Reader"
         color: "#e8e5df"
-        font.family: "Inter"
+        font.family: "Noto Sans"
         font.pixelSize: 13
         font.bold: true
+        renderType: Text.NativeRendering
       }
     }
 
@@ -82,7 +90,7 @@ QQC.ApplicationWindow {
         HoverHandler { id: hover }
         QQC.ToolTip.visible: hover.hovered
         QQC.ToolTip.text: tip
-        Text { anchors.centerIn: parent; text: parent.glyph; color: "#d1cec8"; font.pixelSize: 14 }
+        Text { anchors.centerIn: parent; text: parent.glyph; color: "#d1cec8"; font.family: "Noto Sans"; font.pixelSize: 14; renderType: Text.NativeRendering }
         TapHandler { onTapped: parent.clicked() }
       }
 
@@ -96,10 +104,20 @@ QQC.ApplicationWindow {
     }
   }
 
+  WebEngineProfile {
+    id: privateProfile
+    offTheRecord: true
+    httpCacheType: WebEngineProfile.MemoryHttpCache
+    persistentCookiesPolicy: WebEngineProfile.NoPersistentCookies
+    spellCheckEnabled: false
+    isPushServiceEnabled: false
+  }
+
   WebEngineView {
     id: webView
     anchors.fill: parent
     url: window.readerUrl
+    profile: privateProfile
     backgroundColor: "#fffdf8"
     focus: true
 

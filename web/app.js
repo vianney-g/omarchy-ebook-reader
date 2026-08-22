@@ -64,10 +64,13 @@ function applyAppearance(redisplay = true) {
   if (!state.rendition) return;
   state.rendition.themes.default(contentTheme());
   const family = state.settings.fontFamily === "publisher" ? "inherit" :
-    state.settings.fontFamily === "sans" ? "Inter, Arial, sans-serif" : "Charter, Georgia, serif";
+    state.settings.fontFamily === "sans" ? '"Noto Sans", ui-sans-serif, sans-serif' :
+      '"Noto Serif", ui-serif, serif';
   state.rendition.themes.override("font-family", family, true);
   state.rendition.themes.override("font-size", `${state.settings.fontSize}px`, true);
   state.rendition.themes.override("line-height", String(state.settings.lineHeight), true);
+  state.rendition.themes.override("font-kerning", "normal", true);
+  state.rendition.themes.override("text-rendering", "optimizeLegibility", true);
   state.rendition.themes.override("max-width", `${state.settings.pageWidth}px`, true);
   state.rendition.themes.override("margin-left", "auto", true);
   state.rendition.themes.override("margin-right", "auto", true);
@@ -100,6 +103,10 @@ function closeDrawers() {
   $("#scrim").hidden = true;
 }
 
+function drawersOpen() {
+  return $$(".drawer.open").length > 0;
+}
+
 function openDrawer(selector) {
   closeDrawers();
   const drawer = $(selector);
@@ -117,7 +124,13 @@ function openDrawer(selector) {
 function chromeAwake() {
   document.body.classList.remove("chrome-hidden");
   clearTimeout(state.hideTimer);
-  if ($$(".drawer.open").length === 0) state.hideTimer = setTimeout(() => document.body.classList.add("chrome-hidden"), 3600);
+  if (!drawersOpen()) state.hideTimer = setTimeout(() => document.body.classList.add("chrome-hidden"), 3600);
+}
+
+function toggleChrome() {
+  clearTimeout(state.hideTimer);
+  if (document.body.classList.contains("chrome-hidden")) chromeAwake();
+  else document.body.classList.add("chrome-hidden");
 }
 
 function bookCard(book) {
@@ -286,6 +299,7 @@ async function openBook(bookId) {
     state.rendition.on("rendered", (_, view) => {
       view.contents.on("keydown", onReaderKey);
       view.contents.on("click", chromeAwake);
+      view.contents.on("mousemove", chromeAwake);
     });
     await state.rendition.display(progress.cfi || undefined);
     state.epub.locations.generate(1400).catch(() => {});
@@ -331,7 +345,6 @@ function onRelocated(location) {
 
 function navigate(direction) {
   if (!state.rendition || state.turning) return;
-  chromeAwake();
   const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
   if (state.settings.flow !== "paginated" || reducedMotion) {
     direction < 0 ? state.rendition.prev() : state.rendition.next();
@@ -354,16 +367,21 @@ function navigate(direction) {
 function onReaderKey(event) { handleKey(event); }
 function handleKey(event) {
   if (event.ctrlKey || event.metaKey || event.altKey) return;
+  if (event.key === "Escape") {
+    event.preventDefault();
+    if (drawersOpen()) { closeDrawers(); chromeAwake(); }
+    else toggleChrome();
+    return;
+  }
   const tag = event.target?.tagName?.toLowerCase();
   if (tag === "input" || tag === "textarea") return;
-  if (event.key === "ArrowLeft" || event.key === "PageUp") navigate(-1);
-  else if (event.key === "ArrowRight" || event.key === "PageDown" || event.key === " ") navigate(1);
+  if (event.key === "ArrowLeft" || event.key === "PageUp") { event.preventDefault(); navigate(-1); }
+  else if (event.key === "ArrowRight" || event.key === "PageDown" || event.key === " ") { event.preventDefault(); navigate(1); }
   else if (event.key === "/") openDrawer("#searchDrawer");
   else if (event.key.toLowerCase() === "b") addBookmark();
   else if (event.key.toLowerCase() === "a") openDrawer("#appearanceDrawer");
   else if (event.key.toLowerCase() === "l") openDrawer("#libraryDrawer");
   else if (event.key.toLowerCase() === "t") openDrawer("#tocDrawer");
-  else if (event.key === "Escape") closeDrawers();
 }
 
 async function searchBook(query) {
@@ -394,8 +412,8 @@ async function searchBook(query) {
 }
 
 function bindControls() {
-  $("#previousZone").addEventListener("click", () => navigate(-1));
-  $("#nextZone").addEventListener("click", () => navigate(1));
+  $("#previousZone").addEventListener("click", event => { event.stopPropagation(); navigate(-1); });
+  $("#nextZone").addEventListener("click", event => { event.stopPropagation(); navigate(1); });
   $("#libraryButton").addEventListener("click", () => openDrawer("#libraryDrawer"));
   $("#tocButton").addEventListener("click", () => openDrawer("#tocDrawer"));
   $("#searchButton").addEventListener("click", () => openDrawer("#searchDrawer"));
@@ -425,8 +443,10 @@ function bindControls() {
     if (cfi) state.rendition.display(cfi);
   });
   document.addEventListener("keydown", handleKey);
-  document.addEventListener("mousemove", event => { if (event.clientY < 100 || event.clientY > innerHeight - 70) chromeAwake(); });
-  document.addEventListener("mouseleave", chromeAwake);
+  document.addEventListener("mousemove", chromeAwake, { passive: true });
+  document.addEventListener("click", event => {
+    if (!event.target.closest(".page-zone")) chromeAwake();
+  });
 }
 
 async function initialize() {

@@ -10,6 +10,7 @@ The library panel is compact and native to the Omarchy shell. Reading opens in a
 
 - Remembers the last book, exact EPUB location, percentage, chapter, and bookmarks
 - Loads the last-read book first and keeps a prominent **Continue reading** card
+- Includes four polished public-domain classics for a ready-to-read offline starter shelf
 - Recursively scans any folder you choose
 - Groups multiple formats of the same book into one library entry
 - Reads EPUB directly, with covers and metadata extracted locally
@@ -18,6 +19,7 @@ The library panel is compact and native to the Omarchy shell. Reading opens in a
 - Includes title/author search, table of contents, in-book search, bookmarks, progress scrubbing, and keyboard navigation
 - Provides text size, serif/sans/publisher fonts, line spacing, reading width, page/scroll layouts, and Paper, Sepia, Slate, and Night themes
 - Adds a tactile Meditations-inspired page turn in paginated mode, with an automatic reduced-motion fallback
+- Keeps page turns distraction-free: navigation never wakes the reader controls
 - Stores state under XDG state/cache folders and never uploads book data
 
 ## Install
@@ -26,15 +28,21 @@ The library panel is compact and native to the Omarchy shell. Reading opens in a
 omarchy plugin add https://github.com/dlpwaters/omarchy-ebook-reader.git --enable
 ```
 
-Leaf Reader needs `qt6-declarative`, `qt6-webengine`, `python`, and `zenity`. These are already present on a standard current Omarchy installation. EPUB and PDF work without Calibre.
+Leaf Reader needs `qt6-declarative`, `qt6-webengine`, `python`, `zenity`, and `noto-fonts`. These are already present on a standard current Omarchy installation. EPUB and PDF work without Calibre.
 
-For Kindle and other conversion-only formats, install Calibre only if you need it:
+On first use, Leaf Reader opens its bundled starter shelf unless `~/Books` already contains ebooks. Choose any other default folder from Reader settings; it is scanned recursively and becomes your library.
+
+Kindle and other conversion-only formats require the optional `calibre` package, which provides `ebook-convert`. Calibre is never used for EPUB/PDF reading or library management.
+
+The starter editions are unmodified Standard Ebooks files. Their exact sources, checksums, and public-domain/CC0 terms are recorded in [STARTER_BOOKS.md](STARTER_BOOKS.md).
+
+## Remove
 
 ```bash
-omarchy pkg add calibre
+omarchy plugin remove io.github.dlpwaters.ebook-reader
 ```
 
-Then click the Leaf Reader bar icon, open the settings button, and choose your ebook folder. The scan includes subfolders automatically.
+Your books are never touched. Omarchy removes the plugin checkout; Leaf Reader's settings, progress, and cache remain in the XDG locations below so reinstalling can restore your place.
 
 ## Use
 
@@ -47,9 +55,10 @@ Then click the Leaf Reader bar icon, open the settings button, and choose your e
 - `B`: add or remove a bookmark
 - `A`: reading appearance
 - `L`: library
+- `Esc`: show or hide the reader controls, or close an open drawer
 - `Ctrl+Shift+Q`: close the reading window
 
-Reader controls fade away while you read and return when the pointer approaches the top or bottom edge.
+Reader controls fade away while you read and return on pointer movement, a click/tap in the reading area, or `Esc`. Keyboard and edge-click page turns do not make them flash back on.
 
 ## Formats
 
@@ -64,7 +73,7 @@ If a book folder contains EPUB plus another format, Leaf Reader always prefers t
 
 ## Privacy and storage
 
-Nothing is sent over the network. The helper binds only to `127.0.0.1`, uses a per-process request token for writes, and serves only known books and bundled reader assets.
+Nothing is sent over the network. The helper binds only to a dynamically selected `127.0.0.1` port, uses a per-process request token for writes, and serves only known books and bundled reader assets. The reader uses an off-the-record WebEngine profile and disables outbound networking for book content.
 
 - Settings: `$XDG_STATE_HOME/omarchy-ebook-reader/settings.json`
 - Reading progress and bookmarks: `$XDG_STATE_HOME/omarchy-ebook-reader/progress.json`
@@ -92,4 +101,4 @@ If a folder was moved, choose it again in Reader settings. If covers or metadata
 
 ## License
 
-Leaf Reader is MIT licensed. Bundled dependency licenses are documented in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Leaf Reader's software is MIT licensed. Bundled dependency licenses are documented in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md); starter-book provenance and separate public-domain/CC0 terms are in [STARTER_BOOKS.md](STARTER_BOOKS.md).

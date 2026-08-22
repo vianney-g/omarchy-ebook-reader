@@ -12,6 +12,8 @@ BarWidget {
   property string lastTitle: ""
   property bool launching: false
   property string launchOutput: ""
+  readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
+  readonly property bool popoutSwitchClosing: panelLoader.item ? panelLoader.item.popoutSwitchClosing === true : false
 
   function inject() {
     var panel = panelLoader.item
@@ -26,6 +28,7 @@ BarWidget {
 
   function open() { if (panelLoader.item) panelLoader.item.open() }
   function close() { if (panelLoader.item) panelLoader.item.close() }
+  function closeForPopoutSwitch() { if (panelLoader.item) panelLoader.item.closeForPopoutSwitch() }
   function toggle() { if (panelLoader.item) panelLoader.item.toggle() }
   function openReader(bookId, title) {
     if (launchProc.running) return

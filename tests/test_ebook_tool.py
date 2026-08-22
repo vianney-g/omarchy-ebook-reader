@@ -65,15 +65,28 @@ class LeafReaderTests(unittest.TestCase):
         self.assertTrue(Path(books[0]["cover"]).is_file())
 
     def test_sidecar_metadata_is_used_without_calibre_database(self):
-        folder = self.library / "Octavia Butler" / "Parable"
+        folder = self.library / "River North" / "Cloud Atlas"
         folder.mkdir(parents=True)
-        (folder / "Parable.azw3").write_bytes(b"kindle")
+        (folder / "Cloud Atlas.azw3").write_bytes(b"kindle")
         (folder / "metadata.opf").write_text("""<package xmlns:dc="http://purl.org/dc/elements/1.1/">
-          <metadata><dc:title>Parable of the Sower</dc:title><dc:creator>Octavia E. Butler</dc:creator></metadata>
+          <metadata><dc:title>Clouds Over Alder</dc:title><dc:creator>River North</dc:creator></metadata>
         </package>""", encoding="utf-8")
         book = leaf.scan_library()[0]
-        self.assertEqual(book["title"], "Parable of the Sower")
-        self.assertEqual(book["author"], "Octavia E. Butler")
+        self.assertEqual(book["title"], "Clouds Over Alder")
+        self.assertEqual(book["author"], "River North")
+
+    def test_fresh_install_prefers_personal_books_then_starter_library(self):
+        base = Path(self.temp.name)
+        home = base / "home"
+        personal = home / "Books"
+        starter = base / "starter-books"
+        starter.mkdir()
+        make_epub(starter / "Welcome.epub")
+        with mock.patch.object(leaf.Path, "home", return_value=home), \
+             mock.patch.object(leaf, "STARTER_LIBRARY_DIR", starter):
+            self.assertEqual(leaf.default_library(), str(starter))
+            make_epub(personal / "Mine.epub")
+            self.assertEqual(leaf.default_library(), str(personal))
 
     def test_progress_and_last_book_are_atomic_and_bounded(self):
         make_epub(self.library / "Book.epub")
@@ -154,6 +167,11 @@ class LeafReaderTests(unittest.TestCase):
         command = popen.call_args.args[0]
         self.assertEqual(command[0], sys.executable)
         self.assertEqual(Path(command[1]).name, "ReaderApp.qml")
+        self.assertEqual(command[2], "--")
+        self.assertEqual(command[3], f"--leaf-reader-url=http://127.0.0.1:4189/?book={book['id']}")
+        webengine_flags = popen.call_args.kwargs["env"]["QTWEBENGINE_CHROMIUM_FLAGS"]
+        self.assertIn("--proxy-server=http://127.0.0.1:9", webengine_flags)
+        self.assertIn("--disable-background-networking", webengine_flags)
         activate.assert_called_once_with(4242)
         self.assertEqual(leaf.progress_state()["lastBookId"], book["id"])
 
