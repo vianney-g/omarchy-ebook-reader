@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.2 — 2026-08-21
+
+- Force ebook title, author, and status metadata to render as plain text in the native library panel
+- Keep untrusted book metadata out of the shared Omarchy bar tooltip
+- Call out Night dark mode explicitly in the appearance gallery
+
 ## 1.1.1 — 2026-08-21
 
 - Reliable foreground colors when switching between Night, Sepia, and Paper themes

@@ -76,7 +76,8 @@ Panel {
     converterAvailable = payload.converterAvailable === true
     rebuildVisibleBooks()
     var recent = lastBook()
-    if (hostWidget && recent) hostWidget.lastTitle = String(recent.title || "")
+    if (hostWidget && recent && typeof hostWidget.setLastTitle === "function")
+      hostWidget.setLastTitle(recent.title)
   }
 
   function rebuildVisibleBooks() {
@@ -263,6 +264,7 @@ Panel {
                     anchors.centerIn: parent; width: parent.width - Style.space(10)
                     visible: parent.children[0].status !== Image.Ready
                     text: root.lastBook() ? String(root.lastBook().title || "") : ""
+                    textFormat: Text.PlainText
                     color: root.foreground; font.family: "Noto Serif"; font.pixelSize: Style.font.caption; font.bold: true
                     horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap; maximumLineCount: 4; elide: Text.ElideRight
                   }
@@ -275,10 +277,12 @@ Panel {
                   Text { text: "CONTINUE READING"; color: root.accent; font.family: root.fontFamily; font.pixelSize: Style.font.caption; font.bold: true; font.letterSpacing: 1 }
                   Text {
                     width: parent.width; text: root.lastBook() ? String(root.lastBook().title || "") : ""
+                    textFormat: Text.PlainText
                     color: root.foreground; font.family: "Noto Serif"; font.pixelSize: Style.font.title; font.bold: true; elide: Text.ElideRight
                   }
                   Text {
                     width: parent.width; text: root.lastBook() ? String(root.lastBook().author || "") : ""
+                    textFormat: Text.PlainText
                     color: root.muted; font.family: root.fontFamily; font.pixelSize: Style.font.body; elide: Text.ElideRight
                   }
                   Row {
@@ -372,6 +376,7 @@ Panel {
                     anchors.centerIn: parent; width: parent.width - Style.space(14)
                     visible: bookImage.status !== Image.Ready
                     text: String(modelData.title || "")
+                    textFormat: Text.PlainText
                     color: root.foreground; font.family: "Noto Serif"; font.pixelSize: Style.font.caption; font.bold: true
                     horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap; maximumLineCount: 5; elide: Text.ElideRight
                   }
@@ -388,12 +393,14 @@ Panel {
                 Text {
                   anchors { top: coverCard.bottom; topMargin: Style.space(7); left: parent.left; right: parent.right }
                   text: String(modelData.title || "")
+                  textFormat: Text.PlainText
                   color: root.foreground; font.family: "Noto Serif"; font.pixelSize: Style.font.caption; font.bold: true
                   horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight
                 }
                 Text {
                   anchors { top: coverCard.bottom; topMargin: Style.space(23); left: parent.left; right: parent.right }
                   text: String(modelData.author || "")
+                  textFormat: Text.PlainText
                   color: root.muted; font.family: root.fontFamily; font.pixelSize: Style.font.caption - 1
                   horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight
                 }
@@ -575,6 +582,7 @@ Panel {
           visible: root.statusText !== ""
           width: parent.width
           text: root.statusText
+          textFormat: Text.PlainText
           color: root.statusError ? "#e06c75" : root.accent
           font.family: root.fontFamily; font.pixelSize: Style.font.caption; font.bold: true
           horizontalAlignment: Text.AlignHCenter

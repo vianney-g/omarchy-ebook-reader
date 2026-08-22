@@ -30,6 +30,7 @@ BarWidget {
   function close() { if (panelLoader.item) panelLoader.item.close() }
   function closeForPopoutSwitch() { if (panelLoader.item) panelLoader.item.closeForPopoutSwitch() }
   function toggle() { if (panelLoader.item) panelLoader.item.toggle() }
+  function setLastTitle(value) { lastTitle = String(value || "") }
   function openReader(bookId, title) {
     if (launchProc.running) return
     launchOutput = ""
@@ -68,7 +69,7 @@ BarWidget {
       try {
         var payload = JSON.parse(root.summaryOutput)
         if (payload && payload.books && payload.books.length > 0)
-          root.lastTitle = String(payload.books[0].title || "")
+          root.setLastTitle(payload.books[0].title)
       } catch (error) {}
     }
   }
@@ -111,7 +112,7 @@ BarWidget {
     text: root.launching ? "󰔟" : "󰂺"
     active: root.launching || (panelLoader.item ? panelLoader.item.opened : false)
     useActiveColor: true
-    tooltipText: root.lastTitle !== "" ? "Leaf Reader · Continue “" + root.lastTitle + "”" : "Leaf Reader"
+    tooltipText: root.lastTitle !== "" ? "Leaf Reader · Continue reading" : "Leaf Reader"
     onPressed: function(mouseButton) {
       if (mouseButton === Qt.RightButton) root.resume()
       else root.toggle()
