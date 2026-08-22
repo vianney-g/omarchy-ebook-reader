@@ -25,7 +25,9 @@ jobs:
       - name: Run tests
         run: python -m unittest discover -s tests -v
       - name: Check reader JavaScript
-        run: node --check web/app.js
+        run: |
+          node --check web/app.js
+          node --check tests/browser-smoke.mjs
       - name: Verify starter books
         working-directory: starter-books
         run: |
