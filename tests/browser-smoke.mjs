@@ -152,17 +152,22 @@ try {
 
   const dark = await evaluate(`(async () => {
     await saveSettings({ theme: 'night' });
+    await new Promise(resolve => setTimeout(resolve, 600));
     const frame = document.querySelector('#viewer iframe');
     return {
       appClass: document.querySelector('#app').className,
       pageBackground: getComputedStyle(document.querySelector('#readerShell')).backgroundColor,
       bookBackground: frame?.contentDocument ? getComputedStyle(frame.contentDocument.body).backgroundColor : '',
-      bookColor: frame?.contentDocument ? getComputedStyle(frame.contentDocument.body).color : ''
+      bookColor: frame?.contentDocument ? getComputedStyle(frame.contentDocument.body).color : '',
+      readableCharacters: Array.from(document.querySelectorAll('#viewer iframe'))
+        .map(item => item.contentDocument?.body?.innerText?.trim() || '')
+        .join(' ').length
     };
   })()`, true);
   assert(dark.appClass === "theme-night", "Night theme did not activate");
   assert(dark.pageBackground === "rgb(29, 29, 29)", `Unexpected night background: ${dark.pageBackground}`);
   assert(dark.bookBackground === "rgb(29, 29, 29)", `EPUB did not receive night background: ${dark.bookBackground}`);
+  assert(dark.readableCharacters > 180, "EPUB text disappeared while applying Night theme");
 
   const capture = await call("Page.captureScreenshot", { format: "png", fromSurface: true });
   fs.writeFileSync(screenshotPath, Buffer.from(capture.data, "base64"));
