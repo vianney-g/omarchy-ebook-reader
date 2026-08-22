@@ -27,6 +27,7 @@ from xml.etree import ElementTree as ET
 
 PLUGIN_DIR = Path(__file__).resolve().parent
 WEB_DIR = PLUGIN_DIR / "web"
+STARTER_LIBRARY_DIR = PLUGIN_DIR / "starter-books"
 STATE_DIR = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "omarchy-ebook-reader"
 CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "omarchy-ebook-reader"
 SETTINGS_FILE = STATE_DIR / "settings.json"
@@ -63,12 +64,23 @@ def read_json(path: Path, fallback: object) -> object:
         return fallback
 
 
+def contains_supported_book(folder: Path) -> bool:
+    if not folder.is_dir():
+        return False
+    for _, directories, files in os.walk(folder):
+        directories[:] = [name for name in directories if not name.startswith(".")]
+        if any(Path(name).suffix.lower().lstrip(".") in SUPPORTED for name in files):
+            return True
+    return False
+
+
 def default_library() -> str:
-    candidates = [Path.home() / "Books", Path.home() / "Calibre Library"]
-    for candidate in candidates:
-        if candidate.is_dir() and any(candidate.rglob("*.epub")):
-            return str(candidate)
-    return str(candidates[0])
+    personal_books = Path.home() / "Books"
+    if contains_supported_book(personal_books):
+        return str(personal_books)
+    if contains_supported_book(STARTER_LIBRARY_DIR):
+        return str(STARTER_LIBRARY_DIR)
+    return str(personal_books)
 
 
 def default_settings() -> dict:
@@ -80,6 +92,7 @@ def default_settings() -> dict:
         "pageWidth": 760,
         "theme": "paper",
         "flow": "paginated",
+        "pageTurn": True,
         "showClock": False,
         "sort": "recent",
     }
@@ -93,6 +106,20 @@ def settings() -> dict:
     return validate_settings(result)
 
 
+def boolean_setting(value, fallback: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off"}:
+            return False
+    if isinstance(value, (int, float)) and value in {0, 1}:
+        return bool(value)
+    return fallback
+
+
 def validate_settings(value: dict) -> dict:
     result = default_settings()
     result.update(value)
@@ -104,7 +131,8 @@ def validate_settings(value: dict) -> dict:
     result["theme"] = result.get("theme") if result.get("theme") in THEMES else "paper"
     result["fontFamily"] = result.get("fontFamily") if result.get("fontFamily") in FONTS else "serif"
     result["flow"] = result.get("flow") if result.get("flow") in FLOWS else "paginated"
-    result["showClock"] = bool(result.get("showClock", False))
+    result["pageTurn"] = boolean_setting(result.get("pageTurn"), True)
+    result["showClock"] = boolean_setting(result.get("showClock"), False)
     result["sort"] = result.get("sort") if result.get("sort") in {"recent", "title", "author", "added"} else "recent"
     return result
 
@@ -334,6 +362,7 @@ def library_payload(force: bool = False, query: str = "", limit: int = 0) -> dic
         "count": len(books),
         "lastBookId": state.get("lastBookId", ""),
         "settings": settings(),
+        "starterLibrary": str(STARTER_LIBRARY_DIR),
         "converterAvailable": shutil.which("ebook-convert") is not None,
     }
 
@@ -406,7 +435,7 @@ def server_alive(info: dict | None = None) -> bool:
 
 
 class ReaderHandler(BaseHTTPRequestHandler):
-    server_version = "LeafReader/1.0"
+    server_version = "LeafReader/1.1"
 
     def log_message(self, fmt: str, *args: object) -> None:
         return
@@ -493,7 +522,7 @@ class ReaderHandler(BaseHTTPRequestHandler):
             self.send_json({"ok": True, "progress": update_progress(book_id, payload)})
             return
         if route == "/api/settings":
-            allowed = {"fontSize", "fontFamily", "lineHeight", "pageWidth", "theme", "flow", "showClock", "sort"}
+            allowed = {"fontSize", "fontFamily", "lineHeight", "pageWidth", "theme", "flow", "pageTurn", "showClock", "sort"}
             self.send_json({"ok": True, "settings": save_settings({k: v for k, v in payload.items() if k in allowed})})
             return
         self.send_json({"ok": False, "error": "Not found"}, 404)
@@ -508,10 +537,10 @@ class ReaderServer(ThreadingHTTPServer):
         super().__init__(address, ReaderHandler)
 
 
-def serve() -> int:
+def serve(port: int = 0) -> int:
     token = secrets.token_urlsafe(24)
-    server = ReaderServer(("127.0.0.1", PORT), token)
-    atomic_json(SERVER_FILE, {"pid": os.getpid(), "port": PORT, "token": token,
+    server = ReaderServer(("127.0.0.1", port), token)
+    atomic_json(SERVER_FILE, {"pid": os.getpid(), "port": server.server_port, "token": token,
                               "helper": str(Path(__file__).resolve()), "revision": runtime_revision(),
                               "started": utc_now()})
     try:
@@ -536,7 +565,7 @@ def start_server() -> dict:
         except (OSError, ValueError, TypeError):
             pass
     STATE_DIR.mkdir(parents=True, exist_ok=True)
-    subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "serve"], stdin=subprocess.DEVNULL,
+    subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "serve", "--port", "0"], stdin=subprocess.DEVNULL,
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     for _ in range(50):
         time.sleep(0.05)
@@ -578,6 +607,19 @@ def activate_reader(pid: int) -> bool:
     return False
 
 
+def reader_environment() -> dict[str, str]:
+    """Keep WebEngine offline while preserving the user's existing Qt flags."""
+    env = os.environ.copy()
+    existing = env.get("QTWEBENGINE_CHROMIUM_FLAGS", "").strip()
+    offline_flags = [
+        "--proxy-server=http://127.0.0.1:9",
+        "--disable-background-networking",
+        "--no-pings",
+    ]
+    env["QTWEBENGINE_CHROMIUM_FLAGS"] = " ".join(filter(None, [existing, *offline_flags]))
+    return env
+
+
 def launch_reader(book_id: str = "") -> dict:
     payload = library_payload()
     books = payload["books"]
@@ -611,9 +653,10 @@ def launch_reader(book_id: str = "") -> dict:
                         break
         except (OSError, ValueError):
             pass
-    process = subprocess.Popen([runner, str(PLUGIN_DIR / "ReaderApp.qml")],
+    process = subprocess.Popen([runner, str(PLUGIN_DIR / "ReaderApp.qml"), "--", f"--leaf-reader-url={url}"],
                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                               stderr=subprocess.DEVNULL, start_new_session=True)
+                               stderr=subprocess.DEVNULL, start_new_session=True,
+                               env=reader_environment())
     atomic_json(READER_FILE, {"pid": process.pid, "bookId": wanted, "url": url, "opened": utc_now()})
     activate_reader(process.pid)
     return {"ok": True, "pid": process.pid, "bookId": wanted, "url": url}
@@ -627,7 +670,8 @@ def parser() -> argparse.ArgumentParser:
     lib.add_argument("--query", default="")
     lib.add_argument("--limit", type=int, default=0)
     sub.add_parser("start")
-    sub.add_parser("serve")
+    served = sub.add_parser("serve")
+    served.add_argument("--port", type=int, default=0)
     opened = sub.add_parser("open")
     opened.add_argument("book_id", nargs="?", default="")
     choose = sub.add_parser("choose-folder")
@@ -640,6 +684,7 @@ def parser() -> argparse.ArgumentParser:
     config.add_argument("--page-width", type=int)
     config.add_argument("--theme", choices=sorted(THEMES))
     config.add_argument("--flow", choices=sorted(FLOWS))
+    config.add_argument("--page-turn", choices=["true", "false"])
     config.add_argument("--sort", choices=["recent", "title", "author", "added"])
     config.add_argument("--show-clock", choices=["true", "false"])
     mark = sub.add_parser("mark-opened")
@@ -651,7 +696,7 @@ def parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     if args.command == "serve":
-        return serve()
+        return serve(args.port)
     if args.command == "library":
         print(json.dumps(library_payload(args.refresh, args.query, args.limit), ensure_ascii=False))
         return 0
@@ -691,6 +736,8 @@ def main(argv: list[str] | None = None) -> int:
                 changes[dest] = value
         if args.show_clock is not None:
             changes["showClock"] = args.show_clock == "true"
+        if args.page_turn is not None:
+            changes["pageTurn"] = args.page_turn == "true"
         if args.library_folder and not Path(os.path.expanduser(args.library_folder)).is_dir():
             print(json.dumps({"ok": False, "error": "That folder does not exist."}))
             return 1
@@ -708,6 +755,8 @@ def main(argv: list[str] | None = None) -> int:
             "ok": WEB_DIR.is_dir() and (WEB_DIR / "vendor/epub.min.js").is_file(),
             "libraryFolder": cfg["libraryFolder"],
             "libraryExists": Path(cfg["libraryFolder"]).is_dir(),
+            "starterLibrary": str(STARTER_LIBRARY_DIR),
+            "starterBooks": len([path for path in STARTER_LIBRARY_DIR.glob("*.epub") if path.is_file()]),
             "books": len(scan_library()),
             "epubRenderer": (WEB_DIR / "vendor/epub.min.js").is_file(),
             "converter": shutil.which("ebook-convert") or "",

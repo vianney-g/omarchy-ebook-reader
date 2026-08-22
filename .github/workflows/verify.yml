@@ -25,4 +25,17 @@ jobs:
       - name: Run tests
         run: python -m unittest discover -s tests -v
       - name: Check reader JavaScript
-        run: node --check web/app.js
+        run: |
+          node --check web/app.js
+          node --check tests/browser-smoke.mjs
+      - name: Verify starter books
+        working-directory: starter-books
+        run: |
+          sha256sum --check SHA256SUMS
+          for book in *.epub; do unzip -tqq "$book"; done
+      - name: Reject personal absolute paths
+        run: |
+          if git grep -I -n -E '(/home/[[:alnum:]_.-]+/|/Users/[[:alnum:]_.-]+/|[A-Za-z]:\\Users\\)' -- ':!.github/workflows/verify.yml'; then
+            echo "Personal absolute path found in tracked text"
+            exit 1
+          fi

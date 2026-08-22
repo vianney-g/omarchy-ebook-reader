@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Leaf Reader</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="app.css">
 </head>
 <body>
@@ -140,7 +141,7 @@
       </section>
 
       <section class="setting-section">
-        <label for="pageWidth">Reading width <output id="pageWidthLabel"></output></label>
+        <label for="pageWidth">Page width <output id="pageWidthLabel"></output></label>
         <input id="pageWidth" type="range" min="520" max="1100" step="20">
       </section>
 
@@ -149,6 +150,14 @@
         <div id="flowChoices" class="choice-row">
           <button data-value="paginated">Pages</button>
           <button data-value="scrolled">Scroll</button>
+        </div>
+      </section>
+
+      <section class="setting-section">
+        <label>Page turn effect</label>
+        <div id="pageTurnChoices" class="choice-row">
+          <button data-value="true">On</button>
+          <button data-value="false">Off</button>
         </div>
       </section>
 

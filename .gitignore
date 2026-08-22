@@ -3,3 +3,25 @@ __pycache__/
 .pytest_cache/
 *.tgz
 preview-private.png
+
+# Never commit a user's library or Calibre-style sidecars by accident.
+*.azw
+*.azw3
+*.epub
+*.fb2
+*.fbz
+*.htmlz
+*.mobi
+*.pdf
+*.prc
+*.rtf
+*.txt
+*.txtz
+cover.jpg
+cover.jpeg
+cover.png
+cover.webp
+metadata.opf
+
+# Only the reviewed, provenance-recorded starter editions are publishable.
+!starter-books/*.epub
