@@ -75,6 +75,20 @@ class LeafReaderTests(unittest.TestCase):
         self.assertEqual(book["title"], "Clouds Over Alder")
         self.assertEqual(book["author"], "River North")
 
+    def test_markup_shaped_epub_metadata_remains_literal_data(self):
+        folder = self.library / "Untrusted Metadata"
+        make_epub(
+            folder / "Markup.epub",
+            title='&lt;img src="http://127.0.0.1:9/cover"&gt; ![cover](http://127.0.0.1:9/cover)',
+            author='&lt;a href="file:///tmp/author"&gt;A. Reader&lt;/a&gt;',
+        )
+        book = leaf.scan_library()[0]
+        self.assertEqual(
+            book["title"],
+            '<img src="http://127.0.0.1:9/cover"> ![cover](http://127.0.0.1:9/cover)',
+        )
+        self.assertEqual(book["author"], '<a href="file:///tmp/author">A. Reader</a>')
+
     def test_fresh_install_prefers_personal_books_then_starter_library(self):
         base = Path(self.temp.name)
         home = base / "home"
@@ -193,13 +207,26 @@ class LeafReaderTests(unittest.TestCase):
             'text: String(modelData.author || "")',
             'text: root.statusText',
         )
-        panel_lines = panel.splitlines()
+        def containing_text_block(position):
+            start = panel.rfind("Text {", 0, position)
+            self.assertNotEqual(start, -1, "metadata binding is not inside a Text object")
+            depth = 0
+            for index in range(start, len(panel)):
+                if panel[index] == "{":
+                    depth += 1
+                elif panel[index] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        self.assertLess(position, index, "metadata binding is outside the nearest Text object")
+                        return panel[start:index + 1]
+            self.fail("unterminated Text object")
+
         for binding in metadata_bindings:
-            matches = [index for index, line in enumerate(panel_lines) if binding in line]
-            self.assertTrue(matches, f"missing guarded metadata binding: {binding}")
-            for index in matches:
-                nearby = "\n".join(panel_lines[max(0, index - 2):index + 4])
-                self.assertIn("textFormat: Text.PlainText", nearby, binding)
+            position = panel.find(binding)
+            self.assertNotEqual(position, -1, f"missing guarded metadata binding: {binding}")
+            while position != -1:
+                self.assertIn("textFormat: Text.PlainText", containing_text_block(position), binding)
+                position = panel.find(binding, position + len(binding))
 
         bar = (ROOT / "BarWidget.qml").read_text(encoding="utf-8")
         self.assertIn('tooltipText: root.lastTitle !== "" ? "Leaf Reader · Continue reading" : "Leaf Reader"', bar)
