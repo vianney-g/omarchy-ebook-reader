@@ -16,9 +16,9 @@ The library panel is compact and native to the Omarchy shell. Reading opens in a
 
 ![Leaf Reader in Sepia and Night reading themes](assets/reader-themes.png)
 
-_Sepia for a warmer page, and Night for comfortable low-light reading._
+_Sepia for a warmer page, and Night dark mode for comfortable low-light reading._
 
-Choose Paper, Sepia, Slate, or Night, then fine-tune the text size, serif/sans/publisher typeface, line spacing, page width, and paginated or scrolling layout. The realistic page-turn effect can be switched off for an instant, motion-free page change, and every choice is remembered.
+Choose Paper, Sepia, Slate, or Night dark mode, then fine-tune the text size, serif/sans/publisher typeface, line spacing, page width, and paginated or scrolling layout. The realistic page-turn effect can be switched off for an instant, motion-free page change, and every choice is remembered.
 
 ## What it does
 

@@ -183,6 +183,29 @@ class LeafReaderTests(unittest.TestCase):
         activate.assert_called_once_with(4242)
         self.assertEqual(leaf.progress_state()["lastBookId"], book["id"])
 
+    def test_untrusted_qml_metadata_is_rendered_as_plain_text(self):
+        panel = (ROOT / "Panel.qml").read_text(encoding="utf-8")
+        metadata_bindings = (
+            'text: root.lastBook() ? String(root.lastBook().title || "") : ""',
+            'width: parent.width; text: root.lastBook() ? String(root.lastBook().title || "") : ""',
+            'width: parent.width; text: root.lastBook() ? String(root.lastBook().author || "") : ""',
+            'text: String(modelData.title || "")',
+            'text: String(modelData.author || "")',
+            'text: root.statusText',
+        )
+        panel_lines = panel.splitlines()
+        for binding in metadata_bindings:
+            matches = [index for index, line in enumerate(panel_lines) if binding in line]
+            self.assertTrue(matches, f"missing guarded metadata binding: {binding}")
+            for index in matches:
+                nearby = "\n".join(panel_lines[max(0, index - 2):index + 4])
+                self.assertIn("textFormat: Text.PlainText", nearby, binding)
+
+        bar = (ROOT / "BarWidget.qml").read_text(encoding="utf-8")
+        self.assertIn('tooltipText: root.lastTitle !== "" ? "Leaf Reader · Continue reading" : "Leaf Reader"', bar)
+        self.assertNotIn('tooltipText: root.lastTitle !== "" ? "Leaf Reader · Continue “" + root.lastTitle', bar)
+        self.assertNotIn("hostWidget.lastTitle =", panel)
+
 
 if __name__ == "__main__":
     unittest.main()
