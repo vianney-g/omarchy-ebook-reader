@@ -10,6 +10,7 @@
   --line: rgba(55, 44, 34, .13);
   --surface: rgba(255, 253, 248, .94);
   --shadow: 0 24px 80px rgba(45, 32, 20, .16);
+  --reader-width: 760px;
 }
 
 * { box-sizing: border-box; }
@@ -61,10 +62,15 @@ body {
 .book-heading span { color: var(--muted); font-size: 12px; margin-top: 2px; }
 
 #readerShell { position: absolute; inset: 0; background: var(--page); }
-#viewer { position: absolute; inset: 76px 64px 48px; }
+#viewer {
+  position: absolute; top: 76px; bottom: 48px; left: 50%;
+  width: min(calc(100% - 128px), var(--reader-width));
+  transform: translateX(-50%);
+}
 #pdfViewer { position: absolute; inset: 66px 0 42px; width: 100%; height: calc(100% - 108px); border: 0; display: none; background: var(--page); }
 .page-turn-effect {
-  position: absolute; inset: 76px 64px 48px; z-index: 7; display: none;
+  position: absolute; top: 76px; bottom: 48px; left: 50%; z-index: 7; display: none;
+  width: min(calc(100% - 128px), var(--reader-width)); transform: translateX(-50%);
   perspective: 2400px; pointer-events: none; overflow: hidden;
 }
 .page-turn-effect.active { display: block; }
@@ -198,9 +204,9 @@ input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer;
 @media (max-width: 700px) {
   .toolbar { grid-template-columns: 1fr 1.5fr 1fr; padding: 0 8px; }
   .toolbar-side { gap: 0; }.icon-button { width: 36px; }.book-heading strong { font-size: 14px; }
-  #viewer { inset-inline: 28px; }.progress-bar { padding-inline: 10px; grid-template-columns: 46px 1fr 46px; }
+  #viewer { width: calc(100% - 56px); }.progress-bar { padding-inline: 10px; grid-template-columns: 46px 1fr 46px; }
   .library-grid { grid-template-columns: repeat(auto-fill, minmax(105px, 1fr)); }
-  .page-turn-effect { inset-inline: 28px; }
+  .page-turn-effect { width: calc(100% - 56px); }
   .page-turn-sheet { width: 100%; }
   .page-turn-effect.turn-next .page-turn-sheet { left: 0; transform-origin: left center; }
   .page-turn-effect.turn-previous .page-turn-sheet { left: 0; transform-origin: right center; }

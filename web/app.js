@@ -59,6 +59,7 @@ function applyAppearance(redisplay = true) {
   $("#lineHeightLabel").textContent = Number(state.settings.lineHeight).toFixed(2);
   $("#pageWidth").value = state.settings.pageWidth;
   $("#pageWidthLabel").textContent = `${state.settings.pageWidth} px`;
+  document.documentElement.style.setProperty("--reader-width", `${state.settings.pageWidth}px`);
   $$("#fontChoices button").forEach(button => button.classList.toggle("active", button.dataset.value === state.settings.fontFamily));
   $$("#flowChoices button").forEach(button => button.classList.toggle("active", button.dataset.value === state.settings.flow));
   if (!state.rendition) return;
@@ -71,9 +72,6 @@ function applyAppearance(redisplay = true) {
   state.rendition.themes.override("line-height", String(state.settings.lineHeight), true);
   state.rendition.themes.override("font-kerning", "normal", true);
   state.rendition.themes.override("text-rendering", "optimizeLegibility", true);
-  state.rendition.themes.override("max-width", `${state.settings.pageWidth}px`, true);
-  state.rendition.themes.override("margin-left", "auto", true);
-  state.rendition.themes.override("margin-right", "auto", true);
   if (redisplay && state.location?.start?.cfi) state.rendition.display(state.location.start.cfi);
 }
 

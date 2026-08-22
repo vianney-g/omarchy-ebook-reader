@@ -5,6 +5,7 @@
 - Four reviewed public-domain starter books for an immediately useful offline shelf
 - Fresh installs prefer an existing `~/Books` library, then fall back to the bundled starter shelf
 - Crisper Noto Serif/Noto Sans rendering across the reader and library panel
+- Correct viewport-based reading width that preserves publisher pagination
 - Page turns no longer wake the top and bottom reader controls
 - Controls now respond deliberately to pointer movement, click/tap, and Escape
 - Current Omarchy panel-switching contract and single-instance manifest declaration
