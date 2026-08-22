@@ -44,11 +44,24 @@ omarchy plugin add https://github.com/dlpwaters/omarchy-ebook-reader.git --enabl
 
 Leaf Reader needs `qt6-declarative`, `qt6-webengine`, `python`, `zenity`, and `noto-fonts`. These are already present on a standard current Omarchy installation. EPUB and PDF work without Calibre.
 
-On first use, Leaf Reader opens its bundled starter shelf unless `~/Books` already contains ebooks. Choose any other default folder from Reader settings; it is scanned recursively and becomes your library.
+On first use, Leaf Reader opens its bundled starter shelf unless `~/Books` already contains ebooks.
 
 Kindle and other conversion-only formats require the optional `calibre` package, which provides `ebook-convert`. Calibre is never used for EPUB/PDF reading or library management.
 
 The starter editions are unmodified Standard Ebooks files. Their exact sources, checksums, and public-domain/CC0 terms are recorded in [STARTER_BOOKS.md](STARTER_BOOKS.md).
+
+## Add your books
+
+Leaf Reader reads books where they already live—there is no import process, and it never moves or modifies the original files.
+
+1. Left-click the Leaf Reader book icon in the Omarchy bar.
+2. Click the **Reader settings** gear in the upper-right corner.
+3. Under **Library folder**, click the folder button and choose the directory that contains your ebooks. You can also type or paste its full path and press `Enter`.
+4. Return to the library. Leaf Reader scans that folder and all of its subfolders, then adds every supported book it finds.
+
+Keep any folder layout you like—books may sit together or be organized into author and title subfolders. When you add, remove, or replace files later, reopen the panel or click **Rescan library** to refresh the shelf. Choosing a different library folder does not delete reading progress or touch the previous folder.
+
+EPUB and PDF open directly. AZW3, MOBI, and the other conversion formats listed under [Formats](#formats) need the optional `ebook-convert` command. DRM-protected ebooks cannot be opened or converted.
 
 ## Remove
 
