@@ -129,14 +129,24 @@ try {
   assert(!motionOff.effectActive && !motionOff.turning, "The page-turn effect ran while switched off");
   await evaluate("saveSettings({ pageTurn: true })", true);
 
+  const chapterOpened = await evaluate(`(async () => {
+    const toc = flattenToc(state.epub?.navigation?.toc || []);
+    const chapter = toc.find(item => /chapter\\s+(1|one|i)\\b/i.test(item.label || ''))
+      || toc.find(item => !/(cover|title|contents|imprint|copyright|colophon|dedication|preface|introduction)/i.test(item.label || ''));
+    if (!chapter?.href) return '';
+    await state.rendition.display(chapter.href);
+    return chapter.label || chapter.href;
+  })()`, true);
+  assert(chapterOpened, "Could not find a readable chapter in the EPUB table of contents");
+
   let readableText = "";
-  for (let index = 0; index < 24; index += 1) {
-    await evaluate("navigate(1)");
-    await new Promise(resolve => setTimeout(resolve, 650));
+  for (let index = 0; index < 8; index += 1) {
     readableText = await evaluate(`Array.from(document.querySelectorAll('#viewer iframe'))
       .map(frame => frame.contentDocument?.body?.innerText?.trim() || '')
       .join(' ')`);
     if (readableText.length > 180) break;
+    await evaluate("navigate(1)");
+    await new Promise(resolve => setTimeout(resolve, 650));
   }
   assert(readableText.length > 180, "Could not reach a readable text page through normal navigation");
 
@@ -167,6 +177,7 @@ try {
     pageTurnCanBeDisabled: true,
     spreadDivisor: initial.spreadDivisor,
     viewerWidth: initial.viewerWidth,
+    readableChapter: chapterOpened,
     controlsStayedHidden: true,
     readableCharacters: readableText.length,
     nightTheme: dark,
