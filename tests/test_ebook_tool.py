@@ -1,6 +1,8 @@
+import base64
 import importlib.machinery
 import io
 import json
+import struct
 import sys
 import tempfile
 import unittest
@@ -13,8 +15,12 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 leaf = importlib.machinery.SourceFileLoader("leaf_ebook_tool", str(ROOT / "ebook-tool")).load_module()
 
+VALID_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+)
 
-def make_epub(path: Path, title="A Quiet Book", author="A. Reader"):
+
+def make_epub(path: Path, title="A Quiet Book", author="A. Reader", cover_data=VALID_PNG):
     container = """<?xml version="1.0"?>
 <container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
   <rootfiles><rootfile full-path="OPS/book.opf" media-type="application/oebps-package+xml"/></rootfiles>
@@ -25,14 +31,14 @@ def make_epub(path: Path, title="A Quiet Book", author="A. Reader"):
     <dc:title>{title}</dc:title><dc:creator>{author}</dc:creator><dc:language>en</dc:language>
     <meta name="cover" content="cover"/>
   </metadata>
-  <manifest><item id="cover" href="cover.jpg" media-type="image/jpeg" properties="cover-image"/></manifest>
+  <manifest><item id="cover" href="cover.png" media-type="image/png" properties="cover-image"/></manifest>
 </package>"""
     path.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr("mimetype", "application/epub+zip")
         archive.writestr("META-INF/container.xml", container)
         archive.writestr("OPS/book.opf", opf)
-        archive.writestr("OPS/cover.jpg", b"\xff\xd8\xff\xd9")
+        archive.writestr("OPS/cover.png", cover_data)
 
 
 class LeafReaderTests(unittest.TestCase):
@@ -57,12 +63,65 @@ class LeafReaderTests(unittest.TestCase):
         folder = self.library / "A Reader" / "A Quiet Book"
         make_epub(folder / "A Quiet Book.epub")
         (folder / "A Quiet Book.azw3").write_bytes(b"kindle")
-        books = leaf.scan_library()
+        def fake_sanitizer(data, book_id, _mtime):
+            target = leaf.CACHE_DIR / "covers" / f"{book_id}.png"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+            return str(target)
+        with mock.patch.object(leaf, "sanitize_cover_bytes", side_effect=fake_sanitizer):
+            books = leaf.scan_library()
         self.assertEqual(len(books), 1)
         self.assertEqual(books[0]["title"], "A Quiet Book")
         self.assertEqual(books[0]["author"], "A. Reader")
         self.assertEqual(books[0]["formats"], ["epub", "azw3"])
         self.assertTrue(Path(books[0]["cover"]).is_file())
+
+    def test_cover_headers_and_dimensions_are_bounded_before_decode(self):
+        self.assertEqual(leaf.cover_image_info(VALID_PNG), ("png", 1, 1))
+        oversized = bytearray(VALID_PNG)
+        oversized[16:24] = struct.pack(">II", leaf.MAX_COVER_DIMENSION + 1, 1)
+        self.assertIsNone(leaf.cover_image_info(bytes(oversized)))
+        self.assertIsNone(leaf.cover_image_info(b"not an image"))
+        with mock.patch.object(leaf.shutil, "which") as which:
+            self.assertEqual(leaf.sanitize_cover_bytes(b"x" * (leaf.MAX_COVER_SOURCE_BYTES + 1), "huge"), "")
+        which.assert_not_called()
+
+    def test_oversized_epub_cover_is_rejected_before_extraction(self):
+        path = self.library / "Oversized.epub"
+        make_epub(path, cover_data=b"x" * (leaf.MAX_COVER_SOURCE_BYTES + 1))
+        with mock.patch.object(leaf, "sanitize_cover_bytes") as sanitizer:
+            self.assertEqual(leaf.safe_cover_from_epub(path, "oversized"), "")
+        sanitizer.assert_not_called()
+
+    def test_cover_is_reencoded_by_resource_limited_process(self):
+        def fake_run(command, **_kwargs):
+            Path(command[-1].removeprefix("png:")).write_bytes(VALID_PNG)
+            return mock.Mock(returncode=0)
+        with mock.patch.object(leaf.shutil, "which", return_value="/usr/bin/magick"), \
+             mock.patch.object(leaf.subprocess, "run", side_effect=fake_run) as run:
+            cover = leaf.sanitize_cover_bytes(VALID_PNG, "bounded-cover")
+        self.assertTrue(Path(cover).is_file())
+        command = run.call_args.args[0]
+        self.assertEqual(command[0], "/usr/bin/magick")
+        self.assertIn("64MiB", command)
+        self.assertIn("512x768>", command)
+        self.assertTrue(command[-1].startswith("png:"))
+        self.assertEqual(run.call_args.kwargs["timeout"], 15)
+
+    def test_sidecar_cover_is_never_served_directly_to_qml(self):
+        folder = self.library / "Sidecar"
+        folder.mkdir()
+        (folder / "Book.azw3").write_bytes(b"kindle")
+        sidecar = folder / "cover.jpg"
+        sidecar.write_bytes(VALID_PNG)
+        bounded = leaf.CACHE_DIR / "covers" / "bounded.png"
+        bounded.parent.mkdir(parents=True)
+        bounded.write_bytes(VALID_PNG)
+        with mock.patch.object(leaf, "sanitize_cover_bytes", return_value=str(bounded)) as sanitizer:
+            book = leaf.scan_library()[0]
+        self.assertEqual(book["cover"], str(bounded))
+        self.assertNotEqual(book["cover"], str(sidecar))
+        sanitizer.assert_called_once()
 
     def test_sidecar_metadata_is_used_without_calibre_database(self):
         folder = self.library / "River North" / "Cloud Atlas"
@@ -232,6 +291,12 @@ class LeafReaderTests(unittest.TestCase):
         self.assertIn('tooltipText: root.lastTitle !== "" ? "Leaf Reader · Continue reading" : "Leaf Reader"', bar)
         self.assertNotIn('tooltipText: root.lastTitle !== "" ? "Leaf Reader · Continue “" + root.lastTitle', bar)
         self.assertNotIn("hostWidget.lastTitle =", panel)
+
+    def test_shell_cover_images_have_explicit_decode_bounds(self):
+        panel = (ROOT / "Panel.qml").read_text(encoding="utf-8")
+        self.assertEqual(panel.count("sourceSize: Qt.size("), 2)
+        self.assertIn("sourceSize: Qt.size(Style.space(140), Style.space(212))", panel)
+        self.assertIn("sourceSize: Qt.size(Style.space(212), Style.space(290))", panel)
 
 
 if __name__ == "__main__":

@@ -42,7 +42,7 @@ Choose Paper, Sepia, Slate, or Night dark mode, then fine-tune the text size, se
 omarchy plugin add https://github.com/dlpwaters/omarchy-ebook-reader.git --enable
 ```
 
-Leaf Reader needs `qt6-declarative`, `qt6-webengine`, `python`, `zenity`, and `noto-fonts`. These are already present on a standard current Omarchy installation. EPUB and PDF work without Calibre.
+Leaf Reader needs `qt6-declarative`, `qt6-webengine`, `python`, `imagemagick`, `zenity`, and `noto-fonts`. EPUB and PDF work without Calibre. ImageMagick is used only in a short-lived, resource-limited process that turns accepted JPEG/PNG cover art into small safe thumbnails; if it is unavailable, Leaf Reader shows text cover placeholders instead of passing raw book images to the Omarchy shell.
 
 On first use, Leaf Reader opens its bundled starter shelf unless `~/Books` already contains ebooks.
 
@@ -100,7 +100,7 @@ If a book folder contains EPUB plus another format, Leaf Reader always prefers t
 
 ## Privacy and storage
 
-Nothing is sent over the network. The helper binds only to a dynamically selected `127.0.0.1` port, uses a per-process request token for writes, and serves only known books and bundled reader assets. The reader uses an off-the-record WebEngine profile and disables outbound networking for book content.
+Nothing is sent over the network. The helper binds only to a dynamically selected `127.0.0.1` port, uses a per-process request token for writes, and serves only known books and bundled reader assets. The reader uses an off-the-record WebEngine profile and disables outbound networking for book content. EPUB and sidecar covers are size/type/dimension checked, decoded outside the shell under explicit resource limits, and re-encoded as bounded PNG thumbnails before the panel loads them.
 
 - Settings: `$XDG_STATE_HOME/omarchy-ebook-reader/settings.json`
 - Reading progress and bookmarks: `$XDG_STATE_HOME/omarchy-ebook-reader/progress.json`

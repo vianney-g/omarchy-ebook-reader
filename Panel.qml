@@ -256,6 +256,7 @@ Panel {
                   Image {
                     anchors.fill: parent
                     source: root.lastBook() ? root.fileUrl(root.lastBook().cover) : ""
+                    sourceSize: Qt.size(Style.space(140), Style.space(212))
                     fillMode: Image.PreserveAspectCrop
                     asynchronous: true
                     visible: status === Image.Ready
@@ -368,6 +369,7 @@ Panel {
                     id: bookImage
                     anchors.fill: parent
                     source: root.fileUrl(modelData.cover)
+                    sourceSize: Qt.size(Style.space(212), Style.space(290))
                     fillMode: Image.PreserveAspectCrop
                     asynchronous: true
                     visible: status === Image.Ready
