@@ -23,5 +23,8 @@ cover.png
 cover.webp
 metadata.opf
 
-# Only the reviewed, provenance-recorded starter editions are publishable.
-!starter-books/*.epub
+# Only these reviewed, provenance-recorded starter editions are publishable.
+!starter-books/charles-dickens_a-christmas-carol.epub
+!starter-books/jane-austen_pride-and-prejudice.epub
+!starter-books/lewis-carroll_alices-adventures-in-wonderland_john-tenniel.epub
+!starter-books/mary-shelley_frankenstein.epub

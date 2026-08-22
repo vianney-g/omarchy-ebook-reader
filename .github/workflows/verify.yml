@@ -31,6 +31,9 @@ jobs:
       - name: Verify starter books
         working-directory: starter-books
         run: |
+          listed_books="$(awk '{print $2}' SHA256SUMS | sort)"
+          tracked_books="$(find . -maxdepth 1 -type f -name '*.epub' -printf '%f\n' | sort)"
+          test "$listed_books" = "$tracked_books"
           sha256sum --check SHA256SUMS
           for book in *.epub; do unzip -tqq "$book"; done
       - name: Reject personal absolute paths
