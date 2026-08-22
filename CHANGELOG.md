@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.1 — 2026-08-21
+
+- Reliable foreground colors when switching between Night, Sepia, and Paper themes
+- Expanded README visuals for the native library panel and reading color options
+- Clearer descriptions of appearance and page-turn controls
+
 ## 1.1.0 — 2026-08-21
 
 - Four reviewed public-domain starter books for an immediately useful offline shelf
@@ -22,6 +28,6 @@
 - Optional local conversion and caching for AZW3, MOBI, AZW, PRC, FB2, FBZ, HTMLZ, RTF, TXT, and TXTZ
 - Paper, Sepia, Slate, and Night reading themes
 - Font, text size, line spacing, reading width, and paginated/scrolled layout controls
-- Meditations-inspired 3D page turns with reduced-motion support
+- Realistic 3D page turns with reduced-motion support
 - Table of contents, in-book search, progress scrubbing, and keyboard navigation
 - Crash-isolated Qt 6 reader process with deterministic Hyprland fullscreen activation
