@@ -66,7 +66,7 @@ BarWidget {
 
   Process {
     id: summaryProc
-    command: [root.helperPath, "library", "--limit", "1"]
+    command: [root.helperPath, "library", "--limit", "1", "--cache-only"]
     stdout: StdioCollector { waitForEnd: true; onStreamFinished: root.summaryOutput = text }
     onExited: {
       try {

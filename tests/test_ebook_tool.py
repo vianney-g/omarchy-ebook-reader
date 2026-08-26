@@ -239,6 +239,19 @@ class LeafReaderTests(unittest.TestCase):
         self.assertEqual(books["La louve du Noirmont"]["author"], "Bernard Clavel")
         self.assertEqual(books["Le carcajou"]["author"], "Bernard Clavel")
 
+    def test_cache_only_library_never_touches_the_filesystem(self):
+        make_epub(self.library / "First.epub", title="First Title")
+        leaf.scan_library()
+        make_epub(self.library / "Second.epub", title="Second Title")
+        with mock.patch.object(leaf, "scan_library", side_effect=AssertionError("must not scan")):
+            cached = leaf.library_payload(surface="shell", cache_only=True)
+        self.assertEqual([book["title"] for book in cached["books"]], ["First Title"])
+        rescanned = leaf.library_payload(surface="shell")
+        self.assertEqual(
+            sorted(book["title"] for book in rescanned["books"]),
+            ["First Title", "Second Title"],
+        )
+
     def test_symlinked_books_and_sidecars_are_not_scanned(self):
         outside = Path(self.temp.name) / "outside"
         outside.mkdir()

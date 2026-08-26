@@ -834,7 +834,10 @@ def scan_library(force: bool = False, deadline_seconds: float = MAX_SCAN_SECONDS
         })
     except ValueError:
         pass
-    sorter = cfg["sort"]
+    return sort_books(books, cfg["sort"])
+
+
+def sort_books(books: list[dict], sorter: str) -> list[dict]:
     if sorter == "title":
         books.sort(key=lambda b: (b["title"].casefold(), b["author"].casefold()))
     elif sorter == "author":
@@ -845,6 +848,41 @@ def scan_library(force: bool = False, deadline_seconds: float = MAX_SCAN_SECONDS
         books.sort(key=lambda b: (b["title"].casefold(), b["author"].casefold()))
         books.sort(key=lambda b: b["lastOpened"], reverse=True)
     return books
+
+
+def cached_books() -> list[dict]:
+    """Rebuild the library list from the on-disk index without touching the filesystem.
+
+    Used for the manual-scan workflow: opening the panel should show whatever
+    was last indexed, not walk a (possibly very large) library every time.
+    """
+    cfg = settings()
+    try:
+        root = Path(cfg["libraryFolder"]).resolve()
+    except OSError:
+        return []
+    cache = read_json(INDEX_FILE, {})
+    if not isinstance(cache, dict) or cache.get("version") != INDEX_VERSION or cache.get("root") != str(root):
+        return []
+    records = cache.get("records", {})
+    if not isinstance(records, dict):
+        return []
+    progress = read_json(PROGRESS_FILE, {})
+    progress_books = progress.get("books", {}) if isinstance(progress, dict) else {}
+    books: list[dict] = []
+    for book_id, record in records.items():
+        if not isinstance(record, dict):
+            continue
+        book = record.get("book")
+        if not isinstance(book, dict):
+            continue
+        book = dict(book)
+        state = normalized_progress_entry(progress_books.get(book_id, {})) if isinstance(progress_books, dict) else normalized_progress_entry({})
+        book["progress"] = state["percentage"]
+        book["lastOpened"] = state["lastOpened"]
+        book["chapter"] = state["chapter"]
+        books.append(book)
+    return sort_books(books, cfg["sort"])
 
 
 def progress_state() -> dict:
@@ -902,11 +940,14 @@ def reader_settings() -> dict:
 def library_payload(
     force: bool = False, query: str = "", limit: int = 0,
     deadline_seconds: float = MAX_SCAN_SECONDS, surface: str = "shell",
-    scanned_books: list[dict] | None = None,
+    scanned_books: list[dict] | None = None, cache_only: bool = False,
 ) -> dict:
-    books = list(scanned_books) if scanned_books is not None else scan_library(
-        force=force, deadline_seconds=deadline_seconds,
-    )
+    if scanned_books is not None:
+        books = list(scanned_books)
+    elif cache_only:
+        books = cached_books()
+    else:
+        books = scan_library(force=force, deadline_seconds=deadline_seconds)
     if query:
         needle = bounded_text(query, 256).casefold()
         books = [b for b in books if needle in f"{b['title']} {b['author']} {' '.join(b['formats'])}".casefold()]
@@ -951,7 +992,7 @@ def library_payload(
 
 
 def find_book(book_id: str) -> dict | None:
-    return next((book for book in scan_library() if book["id"] == book_id), None)
+    return next((book for book in cached_books() if book["id"] == book_id), None)
 
 
 def readable_file(book: dict) -> Path:
@@ -1279,7 +1320,7 @@ class ReaderServer(ThreadingHTTPServer):
                 atomic_json(SERVER_FILE, info)
 
     def refresh_books(self) -> list[dict]:
-        books = scan_library()
+        books = cached_books()
         with self.book_lock:
             self.books = {book["id"]: book for book in books}
         return books
@@ -1447,7 +1488,7 @@ def reader_environment() -> dict[str, str]:
 
 
 def launch_reader(book_id: str = "") -> dict:
-    books = scan_library()
+    books = cached_books()
     state = progress_state()
     wanted = book_id or str(state.get("lastBookId", ""))
     if wanted and not any(book["id"] == wanted for book in books):
@@ -1486,6 +1527,7 @@ def parser() -> argparse.ArgumentParser:
     sub = result.add_subparsers(dest="command", required=True)
     lib = sub.add_parser("library")
     lib.add_argument("--refresh", action="store_true")
+    lib.add_argument("--cache-only", action="store_true")
     lib.add_argument("--query", default="")
     lib.add_argument("--limit", type=int, default=0)
     lib.add_argument("--deadline", type=float, default=MAX_SCAN_SECONDS)
@@ -1524,6 +1566,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "library":
         print(json.dumps(library_payload(
             args.refresh, args.query, args.limit, args.deadline, surface="shell",
+            cache_only=args.cache_only,
         ), ensure_ascii=False))
         return 0
     if args.command == "start":

@@ -60,7 +60,7 @@ Panel {
     libraryOutput = ""
     libraryProc.command = force
       ? [helperPath, "library", "--refresh"]
-      : [helperPath, "library"]
+      : [helperPath, "library", "--cache-only"]
     libraryProc.running = true
   }
 
@@ -330,7 +330,7 @@ Panel {
               visible: !root.loading && root.books.length === 0
               width: parent.width
               topPadding: Style.space(34); bottomPadding: Style.space(34)
-              text: "No ebooks found yet. Open Reader settings and choose the folder that holds your books."
+              text: "No ebooks indexed yet. Check your library folder in Reader settings, then click refresh to scan it."
               color: root.muted; font.family: root.fontFamily; font.pixelSize: Style.font.body
               horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap
             }
