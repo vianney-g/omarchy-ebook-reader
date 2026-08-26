@@ -257,6 +257,22 @@ class LeafReaderTests(unittest.TestCase):
         self.assertEqual(books[0]["author"], "Readable Author")
         self.assertEqual(books[0]["cover"], "")
 
+    def test_book_with_non_utf8_zip_entry_name_is_still_indexed(self):
+        folder = self.library / "LegacyEncoding"
+        make_epub(folder / "Book.epub", title="Readable Title", author="Readable Author")
+        original_open = leaf.zipfile.ZipFile.open
+
+        def flaky_open(self, name, *args, **kwargs):
+            filename = name if isinstance(name, str) else name.filename
+            if filename.endswith("container.xml"):
+                raise UnicodeDecodeError("utf-8", b"\xc9", 0, 1, "invalid continuation byte")
+            return original_open(self, name, *args, **kwargs)
+
+        with mock.patch.object(leaf.zipfile.ZipFile, "open", flaky_open):
+            books = leaf.scan_library()
+        self.assertEqual(len(books), 1)
+        self.assertEqual(books[0]["title"], "Book")
+
     def test_truncated_scan_keeps_previously_indexed_books(self):
         make_epub(self.library / "Alpha.epub", title="Alpha Book")
         make_epub(self.library / "Beta.epub", title="Beta Book")
