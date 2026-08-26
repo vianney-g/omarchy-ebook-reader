@@ -10,6 +10,7 @@ import unittest
 import urllib.request
 import warnings
 import zipfile
+import zlib
 from pathlib import Path
 from unittest import mock
 
@@ -238,6 +239,23 @@ class LeafReaderTests(unittest.TestCase):
         self.assertEqual(set(books), {"La louve du Noirmont", "Le carcajou"})
         self.assertEqual(books["La louve du Noirmont"]["author"], "Bernard Clavel")
         self.assertEqual(books["Le carcajou"]["author"], "Bernard Clavel")
+
+    def test_book_with_corrupted_cover_stream_is_still_indexed(self):
+        folder = self.library / "Corrupted"
+        make_epub(folder / "Book.epub", title="Readable Title", author="Readable Author")
+        original = leaf.bounded_zip_member
+
+        def flaky(archive, name, limit):
+            if limit == leaf.MAX_COVER_SOURCE_BYTES:
+                raise zlib.error("Error -3 while decompressing data: invalid code lengths set")
+            return original(archive, name, limit)
+
+        with mock.patch.object(leaf, "bounded_zip_member", side_effect=flaky):
+            books = leaf.scan_library()
+        self.assertEqual(len(books), 1)
+        self.assertEqual(books[0]["title"], "Readable Title")
+        self.assertEqual(books[0]["author"], "Readable Author")
+        self.assertEqual(books[0]["cover"], "")
 
     def test_truncated_scan_keeps_previously_indexed_books(self):
         make_epub(self.library / "Alpha.epub", title="Alpha Book")

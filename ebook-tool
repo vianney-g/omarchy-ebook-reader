@@ -24,6 +24,7 @@ import threading
 import time
 import urllib.parse
 import zipfile
+import zlib
 from datetime import datetime, timezone
 from http import HTTPStatus
 from http.cookies import SimpleCookie
@@ -389,7 +390,7 @@ def epub_metadata(path: Path) -> dict:
             opf_path = safe_epub_member_name(node.attrib.get("full-path", ""))
             opf_data = bounded_zip_member(archive, opf_path, MAX_EPUB_PACKAGE_XML_BYTES)
             return parse_opf_bytes(opf_data) if opf_data is not None else {}
-    except (OSError, RuntimeError, NotImplementedError, zipfile.BadZipFile, ET.ParseError):
+    except (OSError, RuntimeError, NotImplementedError, zipfile.BadZipFile, ET.ParseError, zlib.error):
         return {}
 
 
@@ -591,7 +592,7 @@ def safe_cover_from_epub(path: Path, book_id: str, deadline: float | None = None
             if data is None:
                 return ""
             return sanitize_cover_bytes(data, book_id, path.stat().st_mtime_ns, deadline)
-    except (OSError, RuntimeError, NotImplementedError, zipfile.BadZipFile, ET.ParseError):
+    except (OSError, RuntimeError, NotImplementedError, zipfile.BadZipFile, ET.ParseError, zlib.error):
         return ""
 
 
