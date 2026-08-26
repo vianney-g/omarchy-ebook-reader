@@ -800,8 +800,11 @@ def scan_library(force: bool = False, deadline_seconds: float = MAX_SCAN_SECONDS
             # the same `deadline` internally (see extract_fresh_metadata's cover
             # subprocess timeout) so they wind down on their own without a wait().
             pool.shutdown(wait=False, cancel_futures=True)
-    books: list[dict] = []
-    next_records: dict[str, dict] = {}
+    # A round only has time to enumerate and (re)process part of a very large
+    # library. Anything not reached this round keeps its previously cached
+    # entry rather than being dropped, so repeated scans accumulate coverage
+    # instead of losing already-indexed books whenever a round runs long.
+    next_records: dict[str, dict] = dict(records)
     for book_id, entry in resolved.items():
         primary = entry["primary"]
         paths = entry["paths"]
@@ -824,23 +827,25 @@ def scan_library(force: bool = False, deadline_seconds: float = MAX_SCAN_SECONDS
             "description": entry["description"],
             "added": added,
         }
-        progress_books = progress.get("books", {}) if isinstance(progress, dict) else {}
-        state = normalized_progress_entry(progress_books.get(book_id, {})) if isinstance(progress_books, dict) else normalized_progress_entry({})
-        book["progress"] = state["percentage"]
-        book["lastOpened"] = state["lastOpened"]
-        book["chapter"] = state["chapter"]
-        books.append(book)
-        next_records[book_id] = {
-            "signature": entry["signature"],
-            "book": {k: v for k, v in book.items() if k not in {"progress", "lastOpened", "chapter"}},
-        }
+        next_records[book_id] = {"signature": entry["signature"], "book": book}
+    # Only prune entries for books that no longer exist once the walk above
+    # has actually reached the end of the tree - otherwise a book merely not
+    # reached yet within this round's time budget is indistinguishable from
+    # a deleted one, and would be wrongly dropped.
+    enumeration_complete = (
+        time.monotonic() < deadline and count < MAX_LIBRARY_FILES and len(groups) < MAX_LIBRARY_BOOKS
+    )
+    if enumeration_complete:
+        current_ids = {stable_id(str(root) + "\0" + group_key) for group_key in groups}
+        next_records = {book_id: record for book_id, record in next_records.items() if book_id in current_ids}
     try:
         atomic_json(INDEX_FILE, {
             "version": INDEX_VERSION, "root": str(root), "generated": utc_now(), "records": next_records,
         })
     except ValueError:
         pass
-    return sort_books(books, cfg["sort"])
+    progress_books = progress.get("books", {}) if isinstance(progress, dict) else {}
+    return sort_books(books_with_progress(next_records, progress_books), cfg["sort"])
 
 
 def sort_books(books: list[dict], sorter: str) -> list[dict]:
@@ -853,6 +858,23 @@ def sort_books(books: list[dict], sorter: str) -> list[dict]:
     else:
         books.sort(key=lambda b: (b["title"].casefold(), b["author"].casefold()))
         books.sort(key=lambda b: b["lastOpened"], reverse=True)
+    return books
+
+
+def books_with_progress(records: dict, progress_books: dict) -> list[dict]:
+    books: list[dict] = []
+    for book_id, record in records.items():
+        if not isinstance(record, dict):
+            continue
+        book = record.get("book")
+        if not isinstance(book, dict):
+            continue
+        book = dict(book)
+        state = normalized_progress_entry(progress_books.get(book_id, {})) if isinstance(progress_books, dict) else normalized_progress_entry({})
+        book["progress"] = state["percentage"]
+        book["lastOpened"] = state["lastOpened"]
+        book["chapter"] = state["chapter"]
+        books.append(book)
     return books
 
 
@@ -875,20 +897,7 @@ def cached_books() -> list[dict]:
         return []
     progress = read_json(PROGRESS_FILE, {})
     progress_books = progress.get("books", {}) if isinstance(progress, dict) else {}
-    books: list[dict] = []
-    for book_id, record in records.items():
-        if not isinstance(record, dict):
-            continue
-        book = record.get("book")
-        if not isinstance(book, dict):
-            continue
-        book = dict(book)
-        state = normalized_progress_entry(progress_books.get(book_id, {})) if isinstance(progress_books, dict) else normalized_progress_entry({})
-        book["progress"] = state["percentage"]
-        book["lastOpened"] = state["lastOpened"]
-        book["chapter"] = state["chapter"]
-        books.append(book)
-    return sort_books(books, cfg["sort"])
+    return sort_books(books_with_progress(records, progress_books), cfg["sort"])
 
 
 def progress_state() -> dict:

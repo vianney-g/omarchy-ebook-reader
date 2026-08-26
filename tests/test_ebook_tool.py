@@ -239,6 +239,21 @@ class LeafReaderTests(unittest.TestCase):
         self.assertEqual(books["La louve du Noirmont"]["author"], "Bernard Clavel")
         self.assertEqual(books["Le carcajou"]["author"], "Bernard Clavel")
 
+    def test_truncated_scan_keeps_previously_indexed_books(self):
+        make_epub(self.library / "Alpha.epub", title="Alpha Book")
+        make_epub(self.library / "Beta.epub", title="Beta Book")
+        first = leaf.scan_library()
+        self.assertEqual(sorted(b["title"] for b in first), ["Alpha Book", "Beta Book"])
+
+        # Simulate a round whose deadline is already gone by the time the
+        # walk checks it, so it enumerates nothing new this round.
+        times = iter([1000.0] + [2000.0] * 1000)
+        with mock.patch.object(leaf.time, "monotonic", side_effect=lambda: next(times)):
+            truncated = leaf.scan_library(deadline_seconds=1.0)
+        self.assertEqual(sorted(b["title"] for b in truncated), ["Alpha Book", "Beta Book"])
+        cache = json.loads(leaf.INDEX_FILE.read_text())
+        self.assertEqual(len(cache["records"]), 2)
+
     def test_cache_only_library_never_touches_the_filesystem(self):
         make_epub(self.library / "First.epub", title="First Title")
         leaf.scan_library()
