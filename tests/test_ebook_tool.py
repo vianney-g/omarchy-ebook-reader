@@ -224,6 +224,21 @@ class LeafReaderTests(unittest.TestCase):
         self.assertEqual(book["title"], "Clouds Over Alder")
         self.assertEqual(book["author"], "River North")
 
+    def test_root_level_sidecar_is_not_applied_to_a_flat_librarys_books(self):
+        (self.library / "metadata.opf").write_text(
+            """<package xmlns:dc="http://purl.org/dc/elements/1.1/">
+              <metadata><dc:title>Portraits Litteraires</dc:title><dc:creator>Sainte-Beuve</dc:creator></metadata>
+            </package>""",
+            encoding="utf-8",
+        )
+        (self.library / "cover.jpg").write_bytes(VALID_PNG)
+        make_epub(self.library / "La louve du Noirmont - Bernard Clavel.epub", title="La louve du Noirmont", author="Bernard Clavel")
+        make_epub(self.library / "Le carcajou - Bernard Clavel.epub", title="Le carcajou", author="Bernard Clavel")
+        books = {book["title"]: book for book in leaf.scan_library()}
+        self.assertEqual(set(books), {"La louve du Noirmont", "Le carcajou"})
+        self.assertEqual(books["La louve du Noirmont"]["author"], "Bernard Clavel")
+        self.assertEqual(books["Le carcajou"]["author"], "Bernard Clavel")
+
     def test_symlinked_books_and_sidecars_are_not_scanned(self):
         outside = Path(self.temp.name) / "outside"
         outside.mkdir()

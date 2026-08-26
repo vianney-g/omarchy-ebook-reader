@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import hashlib
 import html
 import json
@@ -43,7 +44,7 @@ SERVER_FILE = STATE_DIR / "server.json"
 READER_FILE = STATE_DIR / "reader.json"
 PORT = 4189
 
-INDEX_VERSION = 2
+INDEX_VERSION = 3
 MAX_EPUB_CONTAINER_XML_BYTES = 64 * 1024
 MAX_EPUB_PACKAGE_XML_BYTES = 2 * 1024 * 1024
 MAX_COVER_SOURCE_BYTES = 8 * 1024 * 1024
@@ -55,11 +56,12 @@ COVER_HEIGHT = 768
 MAX_SETTINGS_BYTES = 64 * 1024
 MAX_RUNTIME_STATE_BYTES = 16 * 1024
 MAX_PROGRESS_BYTES = 8 * 1024 * 1024
-MAX_INDEX_BYTES = 32 * 1024 * 1024
-MAX_LIBRARY_FILES = 5000
-MAX_LIBRARY_BOOKS = 2000
-MAX_SHELL_BOOKS = 1000
-MAX_SCAN_SECONDS = 8.0
+MAX_INDEX_BYTES = 64 * 1024 * 1024
+MAX_LIBRARY_FILES = 60_000
+MAX_LIBRARY_BOOKS = 30_000
+MAX_SHELL_BOOKS = 30_000
+MAX_SCAN_SECONDS = 20.0
+MAX_SCAN_WORKERS = 8
 MAX_PATH_CHARS = 4096
 MAX_TITLE_CHARS = 512
 MAX_AUTHOR_CHARS = 256
@@ -77,7 +79,7 @@ MAX_EPUB_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
 MAX_EPUB_CENTRAL_DIRECTORY_BYTES = 16 * 1024 * 1024
 MAX_POST_BYTES = 256 * 1024
 MAX_HTTP_WORKERS = 8
-MAX_SHELL_PAYLOAD_BYTES = 2 * 1024 * 1024
+MAX_SHELL_PAYLOAD_BYTES = 8 * 1024 * 1024
 
 SUPPORTED = {"epub", "azw", "azw3", "mobi", "prc", "pdf", "fb2", "fbz", "htmlz", "txt", "txtz", "rtf"}
 CONVERTIBLE = SUPPORTED - {"epub", "pdf"}
@@ -404,8 +406,7 @@ def sidecar_metadata(directory: Path) -> dict:
 
 
 def clean_stem(value: str) -> str:
-    result = re.sub(r"\s+-\s+[^-]{2,80}$", "", value)
-    result = re.sub(r"\s*\(\d+\)$", "", result)
+    result = re.sub(r"\s*\(\d+\)$", "", value)
     result = re.sub(r"[_\s]+", " ", result).strip(" ._-")
     return bounded_text(result or "Untitled", MAX_TITLE_CHARS, "Untitled")
 
@@ -638,6 +639,41 @@ def normalized_progress_entry(value: object) -> dict:
     }
 
 
+def extract_fresh_metadata(primary: Path, paths: list[Path], root: Path, book_id: str, deadline: float) -> dict:
+    """Parse title/author/cover from disk for a book that isn't cached yet.
+
+    Pure with respect to shared state (each book writes its own book_id-keyed
+    cover file), so callers may run this concurrently across books.
+    """
+    has_dedicated_folder = primary.parent != root
+    metadata = sidecar_metadata(primary.parent) if has_dedicated_folder else {}
+    if not metadata and primary.suffix.lower() == ".epub":
+        metadata = epub_metadata(primary)
+    title = bounded_text(metadata.get("title"), MAX_TITLE_CHARS) or clean_stem(primary.stem)
+    authors = metadata.get("authors") or []
+    if isinstance(authors, str):
+        authors = [authors]
+    authors = [bounded_text(author, MAX_AUTHOR_CHARS) for author in authors[:MAX_AUTHORS]]
+    authors = [author for author in authors if author]
+    cover_path = primary.parent / "cover.jpg"
+    cover = (
+        safe_cover_from_sidecar(cover_path, book_id, deadline)
+        if has_dedicated_folder and cover_path.is_file() and not cover_path.is_symlink()
+        else ""
+    )
+    if not cover:
+        epub_path = next((p for p in paths if p.suffix.lower() == ".epub"), None)
+        if epub_path:
+            cover = safe_cover_from_epub(epub_path, book_id, deadline)
+    return {
+        "title": title,
+        "authors": authors,
+        "cover": cover,
+        "language": bounded_text(metadata.get("language"), MAX_LANGUAGE_CHARS),
+        "description": bounded_text(metadata.get("description"), MAX_DESCRIPTION_CHARS),
+    }
+
+
 def scan_library(force: bool = False, deadline_seconds: float = MAX_SCAN_SECONDS) -> list[dict]:
     cfg = settings()
     root = Path(cfg["libraryFolder"])
@@ -697,8 +733,8 @@ def scan_library(force: bool = False, deadline_seconds: float = MAX_SCAN_SECONDS
                 break
         if count >= MAX_LIBRARY_FILES or len(groups) >= MAX_LIBRARY_BOOKS:
             break
-    books: list[dict] = []
-    next_records: dict[str, dict] = {}
+    resolved: dict[str, dict] = {}
+    pending: list[tuple[str, list[Path], Path, str]] = []
     for group_key, paths in groups.items():
         if time.monotonic() >= deadline:
             break
@@ -707,10 +743,11 @@ def scan_library(force: bool = False, deadline_seconds: float = MAX_SCAN_SECONDS
         primary = paths[0]
         book_id = stable_id(str(root) + "\0" + group_key)
         signature_paths = list(paths)
-        signature_paths.extend(
-            p for p in (primary.parent / "metadata.opf", primary.parent / "cover.jpg")
-            if p.is_file() and not p.is_symlink()
-        )
+        if primary.parent != root:
+            signature_paths.extend(
+                p for p in (primary.parent / "metadata.opf", primary.parent / "cover.jpg")
+                if p.is_file() and not p.is_symlink()
+            )
         try:
             signature = "|".join(
                 f"{p}:{p.stat().st_mtime_ns}:{p.stat().st_size}" for p in signature_paths
@@ -727,43 +764,58 @@ def scan_library(force: bool = False, deadline_seconds: float = MAX_SCAN_SECONDS
             authors = [bounded_text(author, MAX_AUTHOR_CHARS) for author in raw_authors[:MAX_AUTHORS]] \
                 if isinstance(raw_authors, list) else []
             authors = [author for author in authors if author]
-            cover = cached_cover_path(cached_book.get("cover"), book_id)
-            language = bounded_text(cached_book.get("language"), MAX_LANGUAGE_CHARS)
-            description = bounded_text(cached_book.get("description"), MAX_DESCRIPTION_CHARS)
+            resolved[book_id] = {
+                "primary": primary, "paths": paths, "signature": signature,
+                "title": title, "authors": authors,
+                "cover": cached_cover_path(cached_book.get("cover"), book_id),
+                "language": bounded_text(cached_book.get("language"), MAX_LANGUAGE_CHARS),
+                "description": bounded_text(cached_book.get("description"), MAX_DESCRIPTION_CHARS),
+            }
         else:
-            metadata = sidecar_metadata(primary.parent)
-            if not metadata and primary.suffix.lower() == ".epub":
-                metadata = epub_metadata(primary)
-            title = bounded_text(metadata.get("title"), MAX_TITLE_CHARS) or clean_stem(primary.stem)
-            authors = metadata.get("authors") or []
-            if isinstance(authors, str):
-                authors = [authors]
-            authors = [bounded_text(author, MAX_AUTHOR_CHARS) for author in authors[:MAX_AUTHORS]]
-            authors = [author for author in authors if author]
-            cover_path = primary.parent / "cover.jpg"
-            cover = safe_cover_from_sidecar(cover_path, book_id, deadline) if cover_path.is_file() and not cover_path.is_symlink() else ""
-            if not cover:
-                epub_path = next((p for p in paths if p.suffix.lower() == ".epub"), None)
-                if epub_path:
-                    cover = safe_cover_from_epub(epub_path, book_id, deadline)
-            language = bounded_text(metadata.get("language"), MAX_LANGUAGE_CHARS)
-            description = bounded_text(metadata.get("description"), MAX_DESCRIPTION_CHARS)
+            pending.append((book_id, paths, primary, signature))
+    if pending:
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=MAX_SCAN_WORKERS)
+        try:
+            futures = {
+                pool.submit(extract_fresh_metadata, primary, paths, root, book_id, deadline): (book_id, paths, primary, signature)
+                for book_id, paths, primary, signature in pending
+            }
+            remaining = max(0.0, deadline - time.monotonic())
+            done, _not_done = concurrent.futures.wait(futures, timeout=remaining)
+            for future in done:
+                book_id, paths, primary, signature = futures[future]
+                try:
+                    fresh = future.result()
+                except Exception:
+                    continue
+                resolved[book_id] = {"primary": primary, "paths": paths, "signature": signature, **fresh}
+        finally:
+            # Queued-but-unstarted work is dropped; already-running workers race
+            # the same `deadline` internally (see extract_fresh_metadata's cover
+            # subprocess timeout) so they wind down on their own without a wait().
+            pool.shutdown(wait=False, cancel_futures=True)
+    books: list[dict] = []
+    next_records: dict[str, dict] = {}
+    for book_id, entry in resolved.items():
+        primary = entry["primary"]
+        paths = entry["paths"]
         try:
             added = datetime.fromtimestamp(primary.stat().st_mtime, timezone.utc).isoformat()
         except (OSError, ValueError, OverflowError):
             added = ""
+        authors = entry["authors"]
         book = {
             "id": book_id,
-            "title": title,
+            "title": entry["title"],
             "authors": authors,
             "author": bounded_text(" & ".join(authors), MAX_AUTHOR_CHARS * 2, "Unknown author") if authors else "Unknown author",
             "path": str(primary),
             "format": primary.suffix.lower().lstrip("."),
             "formats": [p.suffix.lower().lstrip(".") for p in paths],
             "files": {p.suffix.lower().lstrip("."): str(p) for p in paths},
-            "cover": cover,
-            "language": language,
-            "description": description,
+            "cover": entry["cover"],
+            "language": entry["language"],
+            "description": entry["description"],
             "added": added,
         }
         progress_books = progress.get("books", {}) if isinstance(progress, dict) else {}
@@ -772,7 +824,10 @@ def scan_library(force: bool = False, deadline_seconds: float = MAX_SCAN_SECONDS
         book["lastOpened"] = state["lastOpened"]
         book["chapter"] = state["chapter"]
         books.append(book)
-        next_records[book_id] = {"signature": signature, "book": {k: v for k, v in book.items() if k not in {"progress", "lastOpened", "chapter"}}}
+        next_records[book_id] = {
+            "signature": entry["signature"],
+            "book": {k: v for k, v in book.items() if k not in {"progress", "lastOpened", "chapter"}},
+        }
     try:
         atomic_json(INDEX_FILE, {
             "version": INDEX_VERSION, "root": str(root), "generated": utc_now(), "records": next_records,
