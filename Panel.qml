@@ -24,6 +24,9 @@ Panel {
   property string actionOutput: ""
   property string statusText: ""
   property bool statusError: false
+  property bool autoScanning: false
+  property int scanRoundBookCount: -1
+  property int scanRoundsRemaining: 0
 
   readonly property var barIdentity: hostWidget || root
   readonly property color foreground: bar ? bar.foreground : Color.foreground
@@ -54,14 +57,29 @@ Panel {
     return false
   }
 
-  function refresh(force) {
+  function refresh(scan) {
     if (libraryProc.running || helperPath === "") return
     loading = true
     libraryOutput = ""
-    libraryProc.command = force
-      ? [helperPath, "library", "--refresh"]
+    // A plain (non "--refresh") scan still walks the library, but reuses the
+    // cached title/author/cover for any book whose signature hasn't changed,
+    // so repeated manual scans make real progress instead of re-extracting
+    // everything already known on every click.
+    libraryProc.command = scan
+      ? [helperPath, "library"]
       : [helperPath, "library", "--cache-only"]
     libraryProc.running = true
+  }
+
+  // A single manual scan click keeps re-running a scan as long as each round
+  // turns up more books than the last, since one round only covers as much
+  // of a large library as fits in its time budget. It stops on its own once
+  // a round adds nothing new (or after a defensive round cap).
+  function startManualScan() {
+    autoScanning = true
+    scanRoundBookCount = -1
+    scanRoundsRemaining = 300
+    refresh(true)
   }
 
   function parseLibrary(exitCode) {
@@ -69,6 +87,7 @@ Panel {
     var payload = null
     try { payload = JSON.parse(libraryOutput) } catch (error) {}
     if (exitCode !== 0 || !payload || !payload.ok) {
+      autoScanning = false
       showStatus(payload && payload.error ? payload.error : "Your library could not be scanned.", true)
       return
     }
@@ -77,8 +96,19 @@ Panel {
     lastBookId = String(payload.lastBookId || "")
     converterAvailable = payload.converterAvailable === true
     rebuildVisibleBooks()
-    if (payload.truncated === true)
+    if (autoScanning) {
+      scanRoundsRemaining -= 1
+      if (books.length > scanRoundBookCount && scanRoundsRemaining > 0) {
+        scanRoundBookCount = books.length
+        showStatus("Scanning your library… " + books.length + " books indexed so far.", false)
+        refresh(true)
+        return
+      }
+      autoScanning = false
+      showStatus(books.length + " books indexed.", false)
+    } else if (payload.truncated === true) {
       showStatus("Showing the first " + books.length + " books. Narrow the selected library folder for a smaller shelf.", false)
+    }
     var recent = lastBook()
     if (hostWidget && recent && typeof hostWidget.setLastTitle === "function")
       hostWidget.setLastTitle(recent.title)
@@ -137,7 +167,7 @@ Panel {
     }
     readerSettings = payload.settings || readerSettings
     showStatus("Saved", false)
-    refresh(true)
+    startManualScan()
   }
 
   onBooksChanged: rebuildVisibleBooks()
@@ -218,7 +248,7 @@ Panel {
             anchors.verticalCenter: parent.verticalCenter
             iconText: "󰑐"; tooltipText: "Rescan library"; foreground: root.foreground; hoverColor: root.accent; bordered: true
             enabled: !root.loading
-            onClicked: root.refresh(true)
+            onClicked: root.startManualScan()
           }
           PanelActionButton {
             id: settingsButton

@@ -60,7 +60,7 @@ MAX_INDEX_BYTES = 64 * 1024 * 1024
 MAX_LIBRARY_FILES = 60_000
 MAX_LIBRARY_BOOKS = 30_000
 MAX_SHELL_BOOKS = 30_000
-MAX_SCAN_SECONDS = 20.0
+MAX_SCAN_SECONDS = 45.0
 MAX_SCAN_WORKERS = 8
 MAX_PATH_CHARS = 4096
 MAX_TITLE_CHARS = 512
@@ -466,14 +466,20 @@ def cover_image_info(data: bytes) -> tuple[str, int, int] | None:
 
 
 def sanitized_cover_is_valid(path: Path) -> bool:
+    """Confirm a previously-cached cover PNG is still the file we wrote.
+
+    The full size ceiling is already enforced by the stat() check below, so
+    this only needs the leading PNG signature/IHDR bytes to confirm the
+    format and dimensions - not the whole (up to MAX_COVER_CACHE_BYTES) file,
+    which would otherwise mean re-reading every cached cover from disk on
+    every scan just to revalidate books nothing changed about.
+    """
     try:
         if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_COVER_CACHE_BYTES:
             return False
         with path.open("rb") as handle:
-            data = handle.read(MAX_COVER_CACHE_BYTES + 1)
-        if len(data) > MAX_COVER_CACHE_BYTES:
-            return False
-        info = cover_image_info(data)
+            header = handle.read(24)
+        info = cover_image_info(header)
         return bool(info and info[0] == "png" and info[1] <= COVER_WIDTH and info[2] <= COVER_HEIGHT)
     except OSError:
         return False
